@@ -48,7 +48,7 @@ To skip the questions, add `--skip`: `init <model> --skip` writes the same file 
 
 `init` names the file by date and time and puts it in `output/`, like `output/20261113-0936.gen.json`, so a second run never overwrites the first. That time is the config's id: everything built from it is named after it. You don't need to type the name later: `plan`, `verify` and `build` use the newest config in `output/` and print which one (`Using output/20261113-0936.gen.json`). To use another, put its name after the command (`plan 20261113-0936.gen.json` finds it in `output/`).
 
-Every file a run writes goes in `output/`, so the project folder stays clean. Commit the configs (`output/*.gen.json`): a config and its seed are what make a run repeatable. Git ignores the rest of `output/` (stores, pilot files, reports), because they are large and any of them can be rebuilt from its config. A bare name after `--out` or `--report` lands in `output/` too; a path with a folder in it (`--out ./here.csv`) is used as given.
+Every file a run writes goes in `output/`, so the project folder stays clean, and git ignores the whole folder, so nothing a run makes is committed back into the repo. To keep a config in git (a config and its seed are what make a run repeatable), copy it out of `output/`, or write it elsewhere with a path (`init <model> --out ./my.gen.json`). A bare name after `--out` or `--report` lands in `output/`; a path with a folder in it (`--out ./here.csv`) is used as given.
 
 ### plan
 
@@ -60,7 +60,7 @@ npx tsx src/cli.ts plan
 
 ### verify
 
-`verify` uses OpenFGA to check a sample of the store. The pilot files it loads are kept in `output/20261113-0936.pilot/`, named after the config.
+`verify` uses OpenFGA to check a sample of the store. The test file it loads is kept as `output/20261113-0936.pilot.fga.yaml`, named after the config.
 
 ```bash
 npx tsx src/cli.ts verify

@@ -23,9 +23,9 @@ const USAGE = `fga-tuple-gen: mock tuple stores for any OpenFGA model
   build [config.gen.json] [--out <file>] [--format csv|jsonl|yaml] [--tenants 0,3,9] [--scale 0.01] [--report report.json]
       Streams the store to output/<config id>.tuples.csv (20261113-0936.tuples.csv for 20261113-0936.gen.json) and prints
       asked versus realized. Exits 1 if a rule is broken.
-  verify [config.gen.json] [--max-tuples 20000] [--scale 0.01] [--keep <dir>]
+  verify [config.gen.json] [--max-tuples 20000] [--scale 0.01] [--out <file>]
       Loads a pilot (whole tenants of the full store) into OpenFGA's in-memory server and compares answers.
-      The pilot files are kept in output/<config id>.pilot.
+      The test file it loads is kept as output/<config id>.pilot.fga.yaml.
 
   Every file a run writes goes in output/. A bare name after --out or --report lands there; a path with a folder is used as given.
   plan, build and verify use the newest config in output/ (then in this folder) when you do not name one.
@@ -187,8 +187,8 @@ async function main() {
   if (command === 'verify') {
     const configPath = configArg(positional)
     const { compiled, resolved } = load(configPath, flags)
-    const dir = flags.get('keep') ?? join(OUTPUT_DIR, `${planId(configPath)}.pilot`)
-    const verdict = verify(compiled, resolved, { dir, ...(flags.has('max-tuples') ? { maxTuples: Number(flags.get('max-tuples')) } : {}) })
+    const file = flags.has('out') ? inOutput(flags.get('out')!) : join(OUTPUT_DIR, `${planId(configPath)}.pilot.fga.yaml`)
+    const verdict = verify(compiled, resolved, { file, ...(flags.has('max-tuples') ? { maxTuples: Number(flags.get('max-tuples')) } : {}) })
     console.log(formatVerdict(verdict))
     if (!verdict.ok) process.exitCode = 1
     return

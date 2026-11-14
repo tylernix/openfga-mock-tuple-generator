@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname } from 'node:path'
 import type { Resolved } from './config.js'
 import { createEvaluator, TupleIndex } from './evaluate.js'
 import { generate, layout, project, rangeOf, type Report } from './generate.js'
@@ -156,8 +156,8 @@ export function buildAssertions(c: Compiled, r: Resolved, dsl: string, tuples: O
 }
 
 export interface VerifyOptions {
-  /** Where the store test file is written. */
-  dir: string
+  /** The store test file to write. A second file, `.recheck.fga.yaml`, is written beside it only when OpenFGA lists part of an answer. */
+  file: string
   /** Tuple budget for the pilot (default 20,000). */
   maxTuples?: number
   /** Objects sampled per type (default 15). */
@@ -238,8 +238,8 @@ export function verify(c: Compiled, r: Resolved, opts: VerifyOptions): Verdict {
   const tenants = opts.tenants ?? pilotTenants(project(c, r).perTenant, opts.maxTuples ?? 20_000)
   const sink = memorySink()
   const report = generate(c, r, { sink, tenants })
-  mkdirSync(opts.dir, { recursive: true })
-  const file = join(opts.dir, 'pilot.fga.yaml')
+  mkdirSync(dirname(opts.file), { recursive: true })
+  const file = opts.file
   const result = referee(c, r, modelDsl(c.model), sink.tuples, file, opts.perType ?? 15)
   const warnings = result.reach.filter((row) => row.overHalf * 2 > row.objects)
     .map((row) => `${row.relation}: ${row.overHalf} of ${row.objects} sampled objects are reached by more than half of their tenant's users. Fine for org-wide access; a wiring problem otherwise.`)

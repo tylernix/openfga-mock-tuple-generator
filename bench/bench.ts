@@ -348,12 +348,12 @@ function referee() {
     // The README's simple config, as the benchmark file has it.
     const { c, r } = loadJob('simple', 1)
     const started = Date.now()
-    row('simple (the README example)', verify(c, r, { dir: join(work, 'simple'), maxTuples: 20_000, perType: 10 }), started)
+    row('simple (the README example)', verify(c, r, { file: join(work, 'simple.fga.yaml'), maxTuples: 20_000, perType: 10 }), started)
   }
   for (const [i, cs] of cases.entries()) {
     const c = model(cs.name)
     const started = Date.now()
-    row(cs.label, verify(c, resolve(c, config(cs.name, cs.patch)), { dir: join(work, String(i)), maxTuples: cs.max, perType: 10 }), started)
+    row(cs.label, verify(c, resolve(c, config(cs.name, cs.patch)), { file: join(work, `${i}.fga.yaml`), maxTuples: cs.max, perType: 10 }), started)
   }
   console.log('## OpenFGA agrees\n')
   console.log(md(rows))

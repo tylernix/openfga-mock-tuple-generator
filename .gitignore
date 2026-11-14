@@ -5,6 +5,5 @@ node_modules/
 *.log
 .DS_Store
 
-# Stores, pilot files and reports are big and rebuilt from a config. The configs are kept: they are what makes a run repeatable.
-/output/*
-!/output/*.gen.json
+# Everything a run writes. Nothing in here is committed back into the source repo.
+/output/

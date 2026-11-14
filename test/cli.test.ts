@@ -171,13 +171,13 @@ describe('the README steps, with no config file named', () => {
     expect(readdirSync(dir)).toContain('here.csv')
   })
 
-  it('verify keeps its pilot files in output/, named after the config', () => {
+  it('verify keeps its pilot file in output/, named after the config', () => {
     const dir = mkdtempSync(join(tmpdir(), 'tuplegen-'))
     dirs.push(dir)
     run(dir, ['init', simple, '--skip', '--out', '20200101-0000.gen.json'])
     const verify = run(dir, ['verify', '--max-tuples', '3000'])
     expect(verify.status, verify.stdout + verify.stderr).toBe(0)
-    expect(readdirSync(join(dir, 'output'))).toContain('20200101-0000.pilot')
+    expect(readdirSync(join(dir, 'output'))).toContain('20200101-0000.pilot.fga.yaml')
   })
 
   it('--skip asks nothing, even when it comes before the model', () => {

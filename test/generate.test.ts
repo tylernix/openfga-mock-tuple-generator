@@ -415,7 +415,7 @@ describe('OpenFGA as referee', () => {
   ] as const) {
     it(`agrees with the generator on a pilot of ${name}`, () => {
       const c = model(name)
-      const verdict = verify(c, resolve(c, config(name, { counts })), { dir: join(work, name), maxTuples: 6_000, perType: 8 })
+      const verdict = verify(c, resolve(c, config(name, { counts })), { file: join(work, `${name}.fga.yaml`), maxTuples: 6_000, perType: 8 })
       expect(verdict.failures).toEqual([])
       expect(verdict.listUsers.total).toBeGreaterThan(20)
       expect(verdict.listUsers.passing).toBe(verdict.listUsers.total)
@@ -431,7 +431,7 @@ describe('OpenFGA as referee', () => {
     const strict = structuredClone(c.model)
     const viewer = strict.type_definitions.find((d: any) => d.type === 'document').metadata.relations.viewer
     viewer.directly_related_user_types = viewer.directly_related_user_types.filter((t: any) => !t.wildcard)
-    const verdict = verify({ ...c, model: strict }, r, { dir: join(work, 'strict'), maxTuples: 6_000, perType: 4 })
+    const verdict = verify({ ...c, model: strict }, r, { file: join(work, 'strict.fga.yaml'), maxTuples: 6_000, perType: 4 })
     expect(verdict.ok).toBe(false)
   })
 })
