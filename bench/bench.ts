@@ -26,6 +26,7 @@ const here = (path: string) => fileURLToPath(new URL(path, import.meta.url))
 /** The configs the scale runs use. They are real files, so anyone can run them: `build bench/gdrive.gen.json --scale 10`. */
 const JOBS = {
   gdrive: here('./gdrive.gen.json'),
+  docs: here('./docs.gen.json'),
   gated: here('./gated.gen.json'),
 } as const
 type JobName = keyof typeof JOBS
@@ -126,6 +127,12 @@ function scale(quick: boolean) {
     { label: 'gdrive, 0.1x', job: { name: 'gdrive', factor: 0.1 } },
     { label: 'gdrive, 1x', job: { name: 'gdrive', factor: 1 } },
     ...(quick ? [] : [{ label: 'gdrive, 10x', job: { name: 'gdrive', factor: 10 } as Job }]),
+    { label: 'docs, 1x', job: { name: 'docs', factor: 1 } },
+    { label: 'docs, 10x', job: { name: 'docs', factor: 10 } },
+    ...(quick ? [] : [
+      { label: 'docs, 100x', job: { name: 'docs', factor: 100 } as Job },
+      { label: 'docs, 300x', job: { name: 'docs', factor: 300 } as Job },
+    ]),
     { label: 'gated, 1x', job: { name: 'gated', factor: 1 } },
   ]
   const rows = [['model, size', 'objects', 'tenants', 'tuples', 'seconds', 'tuples / second', 'peak memory (MB)', 'CSV size (MB)', 'rows re-read from the file', 'rows the model does not allow', 'rule violations', 'depth reached / asked']]
@@ -269,6 +276,63 @@ function auditFile() {
   console.log('\nThis re-reads the CSV and derives everything from the tuples and the model JSON. It uses none of the generator\'s own reports.\n')
 }
 
+/** The docs config: re-reads its CSV with code that shares nothing with the generator and checks what the model promises. */
+function auditDocs() {
+  const { c, r } = loadJob('docs', 1)
+  const dir = mkdtempSync(join(tmpdir(), 'fga-tuple-gen-bench-'))
+  const path = join(dir, 'store.csv')
+  const sink = fileSink(path, 'csv')
+  generate(c, r, { sink })
+  sink.close()
+
+  const allowed = allowedKeys(c.model)
+  const rows = readFileSync(path, 'utf8').split('\n')
+  rows.shift()
+  while (rows.length && !rows[rows.length - 1]) rows.pop()
+
+  let invalid = 0
+  const memberOf = new Map<string, Set<string>>()
+  const orgOfDoc = new Map<string, string>()
+  const owners = new Map<string, number>()
+  const viewers = new Map<string, number>()
+  const ownerOrgChecks: [string, string][] = []
+  const viewerOrgChecks: [string, string][] = []
+  const docsPerOrg = new Map<string, number>()
+  for (const row of rows) {
+    const [ut, uid, ur, rel, ot, oid] = row.split(',')
+    if (!allowed.has(`${ot}#${rel}@${ut}#${ur}`)) invalid++
+    if (ot === 'organization' && rel === 'member') memberOf.set(`user:${uid}`, (memberOf.get(`user:${uid}`) ?? new Set()).add(oid))
+    else if (ot === 'document' && rel === 'org') {
+      orgOfDoc.set(oid, uid)
+      docsPerOrg.set(uid, (docsPerOrg.get(uid) ?? 0) + 1)
+    } else if (ot === 'document' && rel === 'owner') {
+      owners.set(oid, (owners.get(oid) ?? 0) + 1)
+      ownerOrgChecks.push([uid, oid])
+    } else if (ot === 'document' && rel === 'viewer') {
+      viewers.set(oid, (viewers.get(oid) ?? 0) + 1)
+      viewerOrgChecks.push([uid, oid])
+    }
+  }
+  const outside = (checks: [string, string][]) => checks.filter(([user, doc]) => !memberOf.get(`user:${user}`)?.has(orgOfDoc.get(doc) ?? '')).length
+  const docs = r.counts.document
+  const notOneOwner = [...owners.values()].filter((n) => n !== 1).length + (docs - owners.size)
+  const shared = viewers.size / docs
+  const sizes = [...docsPerOrg.values()].sort((a, b) => b - a)
+  rmSync(dir, { recursive: true, force: true })
+
+  const out = [['check, on the docs file written at 1x', 'result', 'detail']]
+  out.push(['every tuple is a type restriction the model allows', verdict(invalid === 0), `${num(rows.length)} tuples read, ${invalid} not allowed`])
+  out.push(['every document has exactly one owner', verdict(notOneOwner === 0), `${num(docs)} documents, ${num(notOneOwner)} without exactly one`])
+  out.push(['every document is in exactly one organization', verdict(orgOfDoc.size === docs && docsPerOrg.size <= r.counts.organization), `${num(orgOfDoc.size)} of ${num(docs)} documents have one`])
+  out.push(['every owner is a member of the document\'s organization', verdict(outside(ownerOrgChecks) === 0 && ownerOrgChecks.length > 0), `${num(outside(ownerOrgChecks))} of ${num(ownerOrgChecks.length)} owners are not`])
+  out.push(['every direct viewer is a member of the document\'s organization', verdict(outside(viewerOrgChecks) === 0 && viewerOrgChecks.length > 0), `${num(outside(viewerOrgChecks))} of ${num(viewerOrgChecks.length)} viewers are not`])
+  out.push(['about 30% of documents are shared with direct viewers, as asked', verdict(Math.abs(shared - 0.3) < 0.01), `${(shared * 100).toFixed(1)}% of documents`])
+  out.push(['organizations differ in size (skew 1)', verdict(sizes.length > 1 && sizes[0] > 10 * sizes[sizes.length - 1]), `largest ${num(sizes[0])} documents, smallest ${num(sizes[sizes.length - 1])}`])
+  console.log('## Independent check of the docs output file\n')
+  console.log(md(out))
+  console.log('\nThe docs config is the one in the README. This re-reads its CSV and checks, from the tuples alone, what the model and the config promise.\n')
+}
+
 function referee() {
   const work = mkdtempSync(join(tmpdir(), 'fga-tuple-gen-bench-'))
   const cases: { name: string; label: string; patch: Patch; max: number }[] = [
@@ -279,11 +343,17 @@ function referee() {
     { name: 'drive', label: 'drive, larger pilot', patch: { counts: { user: 6_000, organization: 40, group: 1_200, folder: 6_000, document: 30_000 } }, max: 60_000 },
   ]
   const rows = [['model', 'pilot tuples', 'tenants', 'ListUsers', 'Check', 'not asserted', 'seconds', 'result']]
+  const row = (label: string, v: ReturnType<typeof verify>, started: number) => rows.push([label, num(v.tuples), String(v.tenants.length), `${v.listUsers.passing + v.incomplete}/${v.listUsers.total}`, `${v.checks.passing}/${v.checks.total}`, String(v.skipped), ((Date.now() - started) / 1000).toFixed(1), verdict(v.ok)])
+  {
+    // The README's docs config, as the benchmark file has it.
+    const { c, r } = loadJob('docs', 1)
+    const started = Date.now()
+    row('docs (the README example)', verify(c, r, { dir: join(work, 'docs'), maxTuples: 20_000, perType: 10 }), started)
+  }
   for (const [i, cs] of cases.entries()) {
     const c = model(cs.name)
     const started = Date.now()
-    const v = verify(c, resolve(c, config(cs.name, cs.patch)), { dir: join(work, String(i)), maxTuples: cs.max, perType: 10 })
-    rows.push([cs.label, num(v.tuples), String(v.tenants.length), `${v.listUsers.passing + v.incomplete}/${v.listUsers.total}`, `${v.checks.passing}/${v.checks.total}`, String(v.skipped), ((Date.now() - started) / 1000).toFixed(1), verdict(v.ok)])
+    row(cs.label, verify(c, resolve(c, config(cs.name, cs.patch)), { dir: join(work, String(i)), maxTuples: cs.max, perType: 10 }), started)
   }
   console.log('## OpenFGA agrees\n')
   console.log(md(rows))
@@ -298,6 +368,7 @@ else {
   environment()
   determinism()
   auditFile()
+  auditDocs()
   referee()
   scale(quick)
   if (failed) {

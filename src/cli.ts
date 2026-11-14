@@ -46,8 +46,19 @@ function load(configPath: string, flags: Map<string, string>) {
 }
 
 async function interview(cfg: Config, types: string[], nesting: string[]): Promise<void> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout })
-  const ask = async (question: string, fallback: string) => (await rl.question(`${question} [${fallback}]: `)).trim() || fallback
+  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: false })
+  // One line per question. `rl.question` drops lines that arrive before it is called, which loses piped answers.
+  const lines = rl[Symbol.asyncIterator]()
+  const ask = async (question: string, fallback: string) => {
+    process.stdout.write(`${question} [${fallback}]: `)
+    const next = await lines.next()
+    const answer = next.done ? '' : next.value.trim()
+    // A terminal echoes what you type; piped answers are echoed so the transcript reads.
+    if (next.done || !process.stdin.isTTY) process.stdout.write(`${answer || fallback}\n`)
+    return answer || fallback
+  }
+  console.log('Answer each question, or press Enter to take the default in [brackets].')
+  console.log('The shape of each relation (how many per object) is left at its default: edit "edges" in the file it writes.\n')
   try {
     const tenant = await ask(`Which type is a tenant (an organization, a site)? One of ${types.join(', ')}, or "none"`, cfg.tenant?.type ?? 'none')
     if (tenant === 'none') cfg.tenant = { type: null, count: Number(await ask('How many separate tenants should the store be split into?', '1')), skew: cfg.tenant?.skew ?? 1 }
@@ -74,7 +85,8 @@ async function main() {
     if (flags.has('interactive')) await interview(cfg, compiled.types, compiled.edges.filter((e) => e.kind === 'nesting').map((e) => e.key))
     resolve(compiled, cfg)
     writeFileSync(out, JSON.stringify(cfg, null, 2) + '\n')
-    console.log(`Wrote ${out}: ${compiled.types.length} types, ${compiled.edges.length} edges. Edit the counts and edges, then run plan.`)
+    console.log(`${flags.has('interactive') ? '\n' : ''}Wrote ${out}: ${compiled.types.length} types, ${compiled.edges.length} edges.`)
+    console.log(`Next: npx tsx src/cli.ts plan ${out}   (then verify, then build). Edit the counts and edges in ${out} any time.`)
     return
   }
 

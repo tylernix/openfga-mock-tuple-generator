@@ -1,0 +1,4 @@
+{
+  "model": "models/docs.fga",
+  "counts": { "user": 5000, "organization": 50, "document": 100000 }
+}

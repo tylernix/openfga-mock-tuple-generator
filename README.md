@@ -2,21 +2,57 @@
 
 Builds a full-size mock tuple store for any OpenFGA model, and has OpenFGA check it.
 
-You give it a model and a config (how many of each type, and a few shape numbers per relation). It writes tuples you can load with `fga tuple write` or `fga store import`; [loading them](#load-the-tuples-into-fga) comes last, after the evidence that the tuples are worth loading.
+You give it a model and a config (how many of each type, and a few shape numbers per relation). It writes tuples you can [load](#load-the-tuples-into-fga) with `fga tuple write` or `fga store import`.
 
-It needs Node (tested on 24) and the [OpenFGA CLI](https://github.com/openfga/cli) (`fga`, tested on 0.8.1) on the PATH. No runtime dependencies; `tsx` and `vitest` run it and test it.
+## Dependencies
+- Node (tested on 24) 
+- [OpenFGA CLI](https://github.com/openfga/cli) (`fga`, tested on 0.8.1) on the PATH. 
+- No runtime dependencies; `tsx` and `vitest` run it and test it.
 
 ## Use it
 
+Run `npm install`
+
+Start with the interactive `init` command. It asks a few questions and builds your config file. This runs on an included sample model:
+
 ```bash
-npm install                                          # tsx and vitest, for running and testing
-npx tsx src/cli.ts init model.fga --out gen.json     # every type and edge, with defaults
+npm install
+npx tsx src/cli.ts init bench/models/docs.fga --interactive
+```
+
+Press Enter to take the default in brackets.
+
+[docs.fga](bench/models/docs.fga) is a small team document app. Users belong to organizations, every document is in one organization and has an owner, and a document can be viewed by its owner, by people it is shared with, and by every member of its organization:
+
+```
+model
+  schema 1.1
+
+type user
+
+type organization
+  relations
+    define member: [user]
+
+type document
+  relations
+    define org: [organization]
+    define owner: [user]
+    # Owners, anyone the document is shared with, and every member of its organization.
+    define viewer: [user] or owner or member from org
+```
+
+For your own model, put its path in place of `bench/models/docs.fga` (a `.fga` or `.json` file). The questions are always the same three kinds: which type is a tenant, how many objects of each type, and, if the model nests a type inside itself, how deep.
+
+Once you have a config file, the other commands read it:
+
+```bash
 npx tsx src/cli.ts plan gen.json                     # tenants and projected tuples; writes nothing
 npx tsx src/cli.ts verify gen.json                   # OpenFGA checks a pilot of the store
 npx tsx src/cli.ts build gen.json --out tuples.csv   # the full store
 ```
 
-`init --interactive` asks for the tenant type, the counts and the nesting depths. `build` also writes `.jsonl` and a `.yaml` store file, and takes `--tenants 0,3,9` to write only those tenants, or `--scale 0.01` to shrink every count to 1%.
+`build` also writes `.jsonl` and a `.yaml` store file, and takes `--tenants 0,3,9` to write only those tenants, or `--scale 0.01` to shrink every count to 1%. To skip the questions, `init <model> --out gen.json` writes the same file with every default, and you edit it by hand (see [The config](#the-config)).
 
 ## The config
 
@@ -24,49 +60,52 @@ npx tsx src/cli.ts build gen.json --out tuples.csv   # the full store
 
 ### The smallest config
 
-Two fields: the model file, and how many objects of each type you want.
+Two fields: the model file, and how many objects of each type you want. This is [bench/docs.smallest.gen.json](bench/docs.smallest.gen.json), for the docs model above. The model path is relative to the config file.
 
 ```json
 {
-  "model": "model.fga",
-  "counts": { "user": 1000, "document": 10000 }
+  "model": "models/docs.fga",
+  "counts": { "user": 5000, "organization": 50, "document": 100000 }
 }
 ```
 
-For this model:
+Try it from the repo root:
 
-```
-type user
-
-type document
-  relations
-    define viewer: [user]
+```bash
+npx tsx src/cli.ts plan   bench/docs.smallest.gen.json    # about 399,000 tuples
+npx tsx src/cli.ts verify bench/docs.smallest.gen.json    # OpenFGA agrees: 48/48 ListUsers, 57/57 Checks
 ```
 
-`plan`, `build` and `verify` all run on it, and OpenFGA agrees with the result. Everything you leave out gets a default: seed 1, numeric ids, the tenant type the model suggests (here the model has none, so the store is one tenant), and a default shape for every relation. That default is half of the documents with about 2 viewers each, and it is listed as a warning:
+Everything you leave out gets a default: seed 1, numeric ids, the tenant type the tool picks from the model (here the organization), and a default shape for every relation. Each default is listed as a warning, so you can see what you have not decided:
 
 ```
 Warnings:
+  - No settings for organization#member:user; used the default (assignment).
+  - No settings for document#org:organization; used the default (container).
+  - No settings for document#owner:user; used the default (assignment).
   - No settings for document#viewer:user; used the default (assignment).
 ```
 
-Every type in the model needs a count. If one is missing, the tool stops and names it (`counts.user is missing`).
+The defaults are plain: every user belongs to one organization, every document is in one organization, and half of the documents have an owner and half have direct viewers, typically 2 each. That is why the next step exists. Every type in the model needs a count; if one is missing, the tool stops and names it (`counts.user is missing`).
 
-### One step up: set one relation
+### One step up: set two relations
 
-To choose the shape of a relation, add it under `edges`. This gives every document exactly 3 viewers:
+To choose the shape of a relation, add it under `edges`. This is [bench/docs.gen.json](bench/docs.gen.json), the config the docs benchmarks run: every document has exactly one owner, and 30% of documents are also shared directly with a few people (typically 3, at most 50).
 
 ```json
 {
-  "model": "model.fga",
-  "counts": { "user": 1000, "document": 10000 },
+  "model": "models/docs.fga",
+  "counts": { "user": 5000, "organization": 50, "document": 100000 },
   "edges": {
-    "document#viewer:user": { "coverage": 1, "count": 3 }
+    "document#owner:user": { "coverage": 1, "count": 1 },
+    "document#viewer:user": { "coverage": 0.3, "count": { "typical": 3, "p90": 10, "max": 50 } }
   }
 }
 ```
 
-`coverage` 1 means every document gets viewers, and `count` 3 means three each. Run `init model.fga` to get every relation, with its default and the question it answers, written out for you to edit.
+`coverage` is the share of documents that get any, and `count` is how many each gets: a number, or a spread (`typical`, `p90`, `max`). The other two relations stay at their defaults and still show as warnings. Run `init <model>` without `--interactive` to get every relation written out, each with its default and the question it answers.
+
+The benchmarks check this config's output file: every document has exactly one owner, owners and direct viewers are members of the document's organization, 29.9% of documents are shared, and the largest organization has 22,226 documents against 444 for the smallest (see [Benchmarks](#independent-check-of-the-docs-output-file)).
 
 ### All the fields
 | Field | Meaning |
@@ -94,7 +133,7 @@ The defaults are guesses. They are written into the config so you see them and c
 
 ### The config the benchmark used
 
-The scale benchmarks run [bench/gdrive.gen.json](bench/gdrive.gen.json). It is what `init` wrote for [gdrive.fga](bench/models/gdrive.fga), with only the counts raised to 200,000 users, 500 organizations, 20,000 groups, 150,000 folders and 2,000,000 documents. Every other value is the default `init` wrote. The gated row uses [bench/gated.gen.json](bench/gated.gen.json) the same way. The benchmark reads these files, so what is shown here is what ran.
+The gdrive scale benchmarks run [bench/gdrive.gen.json](bench/gdrive.gen.json); the docs ones run the [one-step-up config](#one-step-up-set-two-relations) above. It is what `init` wrote for [gdrive.fga](bench/models/gdrive.fga), with only the counts raised to 200,000 users, 500 organizations, 20,000 groups, 150,000 folders and 2,000,000 documents. Every other value is the default `init` wrote. The gated row uses [bench/gated.gen.json](bench/gated.gen.json) the same way. The benchmark reads these files, so what is shown here is what ran.
 
 The 0.01x, 0.1x and 10x rows are the same file with `--scale`, which multiplies every count, and so the number of organizations, which are the tenants:
 
@@ -252,7 +291,7 @@ The model defines which tuples are allowed. The tool reads the model, builds the
 5. **Draw every number from the object it is for.** Each random draw comes from a stream keyed by the seed, the edge and the object's index, not from one shared stream.
    *Why it works?* The same config writes the same store (the benchmarks compare hashes), a tenant built alone is identical to its slice of the full store, and changing one edge's settings changes no other edge's tuples.
 6. **Stream it, tenant by tenant.** Only the tenant being built is held in memory, and tuples are written out as they are made.
-   *Why it works?* Memory depends on the largest tenant, not on the size of the store. The 106 million tuple store ran in 329 MB, against 116 MB for a 100,000 tuple one.
+   *Why it works?* Memory depends on the largest tenant, not on the size of the store. The 106 million tuple store ran in 338 MB, against 96 MB for a 105,000 tuple one.
 7. **Check its own work.** After each tenant, a separate pass re-derives depth, cycles, containers and tenant crossings from the parent and container choices behind the tuples it wrote, and the build compares the realized counts with what you asked for. A broken rule fails the build.
    *Why it works?* The rules are checked on the result, not assumed from the code that made it. The benchmarks go further and re-read a written file with code that shares nothing with the generator.
 8. **Final OpenFGA check.** `verify` writes a few whole tenants into the CLI's in-memory OpenFGA and compares its answers with the tool's own.
@@ -293,32 +332,34 @@ It proves the tuples are accepted and mean what the report says. It does not pro
 Run them yourself; every number below comes from this one command and is checked, not asserted:
 
 ```bash
-npx tsx bench/bench.ts          # about 3 minutes (2 min 49 s on the machine below); needs about 4.5 GB of free disk
-npx tsx bench/bench.ts --quick  # skips the 100-million-tuple run and the 4 GB file
+npx tsx bench/bench.ts          # about 5 minutes (5 min 13 s on the machine below); needs about 4.5 GB of free disk
+npx tsx bench/bench.ts --quick  # skips the 100-million-tuple runs and the 4 GB files
 ```
-
-
-
-### Scale and speed
-
-The model is [gdrive.fga](bench/models/gdrive.fga): organizations that contain groups, nested folders and documents, with users, group members, owners and a `but not` exclusion. Every row used the default shape numbers, with nesting depth 3.
-
-Every row writes the whole CSV to disk, then re-reads the file line by line, counts the rows and checks that each is a type restriction the model allows. The file is deleted afterwards. Seconds include writing the file.
 
 Measured on an Apple M3 Pro (11 cores, 18 GB), Node 24.14, OpenFGA CLI 0.8.1, 2026-11-14. One run each; speed varies by a few percent between runs. Each scale row is a separate process, so its peak memory is its own. It is taken before the file is re-read.
 
+### Scale and speed
+
+Two models run at several sizes. [docs.fga](bench/models/docs.fga) is the example above, with [docs.gen.json](bench/docs.gen.json). [gdrive.fga](bench/models/gdrive.fga) is bigger: organizations that contain groups, nested folders and documents, with users, group members, owners and a `but not` exclusion, with [gdrive.gen.json](bench/gdrive.gen.json) (shown [below](#the-config-the-benchmark-used)). Every row uses the config's own numbers, scaled with `--scale`.
+
+Every row writes the whole CSV to disk, then re-reads the file line by line, counts the rows and checks that each is a type restriction the model allows. The file is deleted afterwards. Seconds include writing the file.
+
 | model, size | objects | tenants | tuples | seconds | tuples / second | peak memory (MB) | CSV size (MB) | rows re-read from the file | rows the model does not allow | rule violations | depth reached / asked |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| gdrive, 0.01x | 23,705 | 5 | 105,465 | 0.1 | 871,612 | 116 | 4 | 105,465 | 0 | 0 | 3/3, 3/3 |
-| gdrive, 0.1x | 237,050 | 50 | 1,057,488 | 1.0 | 1,009,053 | 227 | 38 | 1,057,488 | 0 | 0 | 3/3, 3/3 |
-| gdrive, 1x | 2,370,500 | 500 | 10,579,235 | 10.1 | 1,050,048 | 284 | 406 | 10,579,235 | 0 | 0 | 3/3, 3/3 |
-| gdrive, 10x | 23,705,000 | 5,000 | 105,829,695 | 102.8 | 1,029,111 | 329 | 4,272 | 105,829,695 | 0 | 0 | 3/3, 3/3 |
-| gated, 1x | 210,200 | 200 | 335,668 | 2.7 | 124,414 | 248 | 10 | 335,668 | 0 | 0 | - |
+| docs, 1x | 105,050 | 50 | 345,204 | 0.3 | 1,369,857 | 144 | 12 | 345,204 | 0 | 0 | - |
+| docs, 10x | 1,050,500 | 500 | 3,440,717 | 2.3 | 1,518,410 | 253 | 127 | 3,440,717 | 0 | 0 | - |
+| docs, 100x | 10,505,000 | 5,000 | 34,413,756 | 21.6 | 1,594,706 | 307 | 1,335 | 34,413,756 | 0 | 0 | - |
+| **docs, 300x** | **31,515,000** | **15,000** | **103,189,935** | **66.0** | **1,562,939** | **337** | **4,122** | **103,189,935** | **0** | **0** | - |
+| gdrive, 0.01x | 23,705 | 5 | 105,465 | 0.1 | 901,410 | 96 | 4 | 105,465 | 0 | 0 | 3/3, 3/3 |
+| gdrive, 0.1x | 237,050 | 50 | 1,057,488 | 1.0 | 1,043,917 | 226 | 38 | 1,057,488 | 0 | 0 | 3/3, 3/3 |
+| gdrive, 1x | 2,370,500 | 500 | 10,579,235 | 9.9 | 1,068,394 | 288 | 406 | 10,579,235 | 0 | 0 | 3/3, 3/3 |
+| **gdrive, 10x** | **23,705,000** | **5,000** | **105,829,695** | **103.6** | **1,021,986** | **338** | **4,272** | **105,829,695** | **0** | **0** | **3/3, 3/3** |
+| gated, 1x | 210,200 | 200 | 335,668 | 2.7 | 123,136 | 248 | 10 | 335,668 | 0 | 0 | - |
 
-- **About a million tuples per second, flat from 1 million to 106 million tuples.** Memory does not grow with size (116 MB at 100,000 tuples, 329 MB at 106 million) because tenants are generated one at a time.
-- **The 10x store is a real 4.3 GB file.** All 105,829,695 rows were written, then re-read, and every one is allowed by the model. A CSV is about 40 bytes per tuple.
-- **The gated model ran about 8x slower per tuple** (124,000 tuples per second). It picks subjects who pass `[user] and member from org`, which means evaluating the rule per object. I expect that is the cost but did not profile it; the model also writes far fewer tuples per object.
-- **The 10x store was written to disk and re-read, not loaded into OpenFGA.** Only pilots are loaded (below).
+- **Over a million tuples per second, flat from 345,000 to 106 million tuples.** The docs model runs at about 1.4 to 1.6 million per second, and gdrive at about 1 million. Memory does not grow with size (96 MB at 100,000 tuples, 338 MB at 106 million) because tenants are generated one at a time.
+- **The two largest stores are real files of 4.1 GB and 4.3 GB.** Every row of both (103,189,935 and 105,829,695) was written, re-read, and is allowed by the model. A CSV is about 40 bytes per tuple.
+- **The gated model ran about 8 to 9x slower per tuple** (123,000 tuples per second). It picks subjects who pass `[user] and member from org`, which means evaluating the rule per object. I expect that is the cost but did not profile it; the model also writes far fewer tuples per object.
+- **The large stores were written to disk and re-read, not loaded into OpenFGA.** Only pilots are loaded (below).
 
 ### Determinism
 
@@ -344,17 +385,32 @@ This re-reads the 1,057,488-tuple CSV and derives everything from the tuples and
 | every user and group sits in the organization of the object it is written on | PASS | 0 of 827,013 tuples cross organizations |
 | every user is in one organization | PASS | 0 users in two or more |
 
+### Independent check of the docs output file
+
+The docs config in [docs.gen.json](bench/docs.gen.json), built at 1x (345,204 tuples), re-read the same way. These check what the model and the config promise, from the tuples alone.
+
+| check | result | detail |
+| --- | --- | --- |
+| every tuple is a type restriction the model allows | PASS | 345,204 tuples read, 0 not allowed |
+| every document has exactly one owner | PASS | 100,000 documents, 0 without exactly one |
+| every document is in exactly one organization | PASS | 100,000 of 100,000 documents have one |
+| every owner is a member of the document's organization | PASS | 0 of 100,000 owners are not |
+| every direct viewer is a member of the document's organization | PASS | 0 of 140,204 viewers are not |
+| about 30% of documents are shared with direct viewers, as asked | PASS | 29.9% of documents |
+| organizations differ in size (skew 1) | PASS | largest 22,226 documents, smallest 444 |
+
 ### OpenFGA agrees
 
 A pilot is whole tenants, exactly as they are in the full store. It is loaded into the CLI's in-memory OpenFGA (`fga model test`), which answers ListUsers and Check on a spread of objects. Its answers must match what the generator's own evaluator says. "Not asserted" answers read a condition or a public grant, or list more than 200 users.
 
 | model | pilot tuples | tenants | ListUsers | Check | not asserted | seconds | result |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| docs (the example above) | 13,728 | 3 | 33/33 | 43/43 | 0 | 1.9 | PASS |
 | drive (wildcards, conditions, nesting) | 4,016 | 3 | 121/121 | 169/169 | 15 | 0.3 | PASS |
 | gated (intersections, exclusions) | 543 | 3 | 86/86 | 113/113 | 0 | 0.1 | PASS |
 | rbac (roles with no org link) | 1,868 | 3 | 63/63 | 97/97 | 0 | 0.1 | PASS |
 | nested (two containers per folder) | 6,069 | 1 | 89/89 | 127/127 | 0 | 0.4 | PASS |
-| drive, larger pilot | 27,069 | 3 | 113/113 | 152/152 | 23 | 6.1 | PASS |
+| drive, larger pilot | 27,069 | 3 | 113/113 | 152/152 | 23 | 6.4 | PASS |
 
 Verifying is the slow part, not generating: 27,069 tuples take 6 seconds to check, and generating them takes well under a second. That is why `verify` loads a pilot and not the whole store.
 

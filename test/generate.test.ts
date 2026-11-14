@@ -1,10 +1,11 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve as resolvePath } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { resolve, scaled } from '../src/config.js'
+import { resolve, scaled, type Config } from '../src/config.js'
 import { generate } from '../src/generate.js'
-import { generationOrder } from '../src/model.js'
+import { compile, generationOrder, loadModel } from '../src/model.js'
 import { memorySink, objectOf, userOf } from '../src/output.js'
 import { levelSizes, pickDistinct, rngFor } from '../src/random.js'
 import { suggestTenant } from '../src/tenants.js'
@@ -94,6 +95,72 @@ describe('the config', () => {
     for (const t of sink.tuples) viewers.set(objectOf(t), (viewers.get(objectOf(t)) ?? 0) + 1)
     expect(viewers.size).toBe(10_000)
     expect([...viewers.values()].every((n) => n === 3)).toBe(true)
+  })
+})
+
+describe('the configs the README shows', () => {
+  const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')
+  const readme = read('../README.md')
+  const load = (file: string) => {
+    const path = fileURLToPath(new URL(`../bench/${file}`, import.meta.url))
+    const cfg: Config = JSON.parse(readFileSync(path, 'utf8'))
+    const c = compile(loadModel(resolvePath(dirname(path), cfg.model)))
+    return { cfg, c, text: readFileSync(path, 'utf8').trim() }
+  }
+  const built = (file: string) => {
+    const { cfg, c } = load(file)
+    const r = resolve(c, cfg)
+    const sink = memorySink()
+    const report = generate(c, r, { sink })
+    return { r, report, tuples: sink.tuples }
+  }
+
+  it('shows each config and the docs model exactly as the files have them', () => {
+    expect(readme).toContain(load('docs.smallest.gen.json').text)
+    expect(readme).toContain(load('docs.gen.json').text)
+    expect(readme).toContain(read('../bench/models/docs.fga').trim())
+  })
+
+  it('the smallest config builds with a warning for each relation it leaves at the default', () => {
+    const { r, report, tuples } = built('docs.smallest.gen.json')
+    expect(r.warnings).toEqual([
+      'No settings for organization#member:user; used the default (assignment).',
+      'No settings for document#org:organization; used the default (container).',
+      'No settings for document#owner:user; used the default (assignment).',
+      'No settings for document#viewer:user; used the default (assignment).',
+    ])
+    expect(report.violationCount).toBe(0)
+    expect(tuples.length).toBeGreaterThan(398_000)
+    expect(tuples.length).toBeLessThan(402_000)
+    // "every user belongs to one organization"
+    const orgs = new Map<string, number>()
+    for (const t of tuples) if (t.objectType === 'organization' && t.relation === 'member') orgs.set(userOf(t), (orgs.get(userOf(t)) ?? 0) + 1)
+    expect(orgs.size).toBe(5_000)
+    expect([...orgs.values()].every((n) => n === 1)).toBe(true)
+  })
+
+  it('docs.gen.json gives every document one owner from its own organization, and shares 30% of them', () => {
+    const { report, tuples } = built('docs.gen.json')
+    expect(report.violationCount).toBe(0)
+    const memberOf = new Map<string, string>()
+    const orgOfDoc = new Map<string, string>()
+    for (const t of tuples) {
+      if (t.objectType === 'organization' && t.relation === 'member') memberOf.set(userOf(t), objectOf(t))
+      else if (t.objectType === 'document' && t.relation === 'org') orgOfDoc.set(`document:${t.objectId}`, userOf(t))
+    }
+    const owners = new Map<string, number>()
+    const shared = new Set<string>()
+    for (const t of tuples) {
+      if (t.objectType !== 'document') continue
+      if (t.relation === 'owner') {
+        owners.set(objectOf(t), (owners.get(objectOf(t)) ?? 0) + 1)
+        expect(memberOf.get(userOf(t))).toBe(orgOfDoc.get(objectOf(t)))
+      } else if (t.relation === 'viewer') shared.add(objectOf(t))
+    }
+    expect(owners.size).toBe(100_000)
+    expect([...owners.values()].every((n) => n === 1)).toBe(true)
+    expect(shared.size / 100_000).toBeGreaterThan(0.29)
+    expect(shared.size / 100_000).toBeLessThan(0.31)
   })
 })
 

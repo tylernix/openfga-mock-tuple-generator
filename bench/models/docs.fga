@@ -1,0 +1,15 @@
+model
+  schema 1.1
+
+type user
+
+type organization
+  relations
+    define member: [user]
+
+type document
+  relations
+    define org: [organization]
+    define owner: [user]
+    # Owners, anyone the document is shared with, and every member of its organization.
+    define viewer: [user] or owner or member from org
