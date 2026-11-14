@@ -4,13 +4,14 @@
  *   npx tsx bench/bench.ts            everything
  *   npx tsx bench/bench.ts --quick    skips the 100M-tuple run
  *
- * Prints Markdown. Needs the OpenFGA CLI (`fga`) on the PATH. Each scale run is a separate process, so its
- * peak memory is its own. Nothing here is mocked: the checks read the files the tool wrote, and OpenFGA
- * answers the assertions.
+ * Prints Markdown. Needs the OpenFGA CLI (`fga`) on the PATH. Every scale run writes its whole CSV to the temp
+ * folder, re-reads it and deletes it; the 10x run is about 4.3 GB, so it needs about 4.5 GB free (--quick skips it).
+ * Each scale run is a separate process, so its peak memory is its own. Nothing here is mocked: the checks read the
+ * files the tool wrote, and OpenFGA answers the assertions.
  */
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { closeSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, statSync } from 'node:fs'
 import { cpus, platform, release, tmpdir, totalmem } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -27,7 +28,7 @@ const JOBS = {
   gated: { model: here('../test/fixtures/gated.fga'), base: { user: 100_000, org: 200, team: 10_000, project: 100_000 } },
 } as const
 type JobName = keyof typeof JOBS
-interface Job { name: JobName; factor: number; sink: 'file' | 'discard' }
+interface Job { name: JobName; factor: number }
 
 const num = (n: number) => Math.round(n).toLocaleString('en-US')
 const md = (rows: string[][]) => [rows[0], rows[0].map(() => '---'), ...rows.slice(1)].map((r) => `| ${r.join(' | ')} |`).join('\n')
@@ -37,25 +38,65 @@ const verdict = (ok: boolean) => {
   return ok ? 'PASS' : 'FAIL'
 }
 
-/** One generation run, in its own process. */
+/** Every `object#relation@subject` shape the model allows, as it appears in a CSV row. */
+function allowedKeys(model: any): Set<string> {
+  const allowed = new Set<string>()
+  for (const d of model.type_definitions) {
+    for (const [rel, meta] of Object.entries<any>(d.metadata?.relations ?? {})) {
+      for (const t of meta.directly_related_user_types ?? []) allowed.add(`${d.type}#${rel}@${t.type}#${t.relation ?? ''}`)
+    }
+  }
+  return allowed
+}
+
+/** Reads a CSV in chunks, so a multi-gigabyte file needs no memory, and counts rows the model does not allow. */
+function rereadCsv(path: string, allowed: Set<string>): { rows: number; notAllowed: number } {
+  const fd = openSync(path, 'r')
+  const buffer = Buffer.alloc(16 * 1024 * 1024)
+  let carry = ''
+  let lines = 0
+  let notAllowed = 0
+  const check = (line: string) => {
+    if (lines++ === 0) return // the header
+    const f = line.split(',', 6)
+    if (!allowed.has(`${f[4]}#${f[3]}@${f[0]}#${f[2]}`)) notAllowed++
+  }
+  for (;;) {
+    const n = readSync(fd, buffer, 0, buffer.length, null)
+    if (!n) break
+    const parts = (carry + buffer.toString('utf8', 0, n)).split('\n')
+    carry = parts.pop()!
+    for (const part of parts) check(part)
+  }
+  if (carry) check(carry)
+  closeSync(fd)
+  return { rows: lines - 1, notAllowed }
+}
+
+/** One generation run, in its own process: writes the whole CSV, then re-reads the file and deletes it. */
 function child(job: Job) {
   const spec = JOBS[job.name]
   const c = compile(loadModel(spec.model))
   const cfg = scaled({ ...defaultConfig(c, spec.model), counts: { ...spec.base } }, job.factor)
   const r = resolve(c, cfg)
   const dir = mkdtempSync(join(tmpdir(), 'fga-tuple-gen-bench-'))
-  const file = job.sink === 'file' ? join(dir, 'store.csv') : '/dev/null'
+  const file = join(dir, 'store.csv')
   const sink = fileSink(file, 'csv')
   const started = Date.now()
   const report = generate(c, r, { sink })
   sink.close()
   const seconds = (Date.now() - started) / 1000
+  const peakRssMb = Math.round(process.resourceUsage().maxRSS / 1024)
+  const fileMb = Math.round(statSync(file).size / 1e6)
+  const reread = rereadCsv(file, allowedKeys(c.model))
   const out = {
     tuples: report.tuples,
     tenants: r.tenants,
     seconds,
-    peakRssMb: Math.round(process.resourceUsage().maxRSS / 1024),
-    fileMb: job.sink === 'file' ? Math.round(statSync(file).size / 1e6) : undefined,
+    peakRssMb,
+    fileMb,
+    rows: reread.rows,
+    notAllowed: reread.notAllowed,
     violations: report.violationCount,
     depth: report.edges.filter((e) => e.depth).map((e) => `${e.depth!.max}/${e.depth!.asked}`).join(', '),
     objects: Object.values(r.counts).reduce((a, b) => a + b, 0),
@@ -74,30 +115,29 @@ function environment() {
 
 function scale(quick: boolean) {
   const jobs: { label: string; job: Job }[] = [
-    { label: 'gdrive, 0.01x', job: { name: 'gdrive', factor: 0.01, sink: 'file' } },
-    { label: 'gdrive, 0.1x', job: { name: 'gdrive', factor: 0.1, sink: 'file' } },
-    { label: 'gdrive, 1x', job: { name: 'gdrive', factor: 1, sink: 'file' } },
-    { label: 'gdrive, 1x', job: { name: 'gdrive', factor: 1, sink: 'discard' } },
-    ...(quick ? [] : [{ label: 'gdrive, 10x', job: { name: 'gdrive', factor: 10, sink: 'discard' } as Job }]),
-    { label: 'gated, 1x', job: { name: 'gated', factor: 1, sink: 'file' } },
+    { label: 'gdrive, 0.01x', job: { name: 'gdrive', factor: 0.01 } },
+    { label: 'gdrive, 0.1x', job: { name: 'gdrive', factor: 0.1 } },
+    { label: 'gdrive, 1x', job: { name: 'gdrive', factor: 1 } },
+    ...(quick ? [] : [{ label: 'gdrive, 10x', job: { name: 'gdrive', factor: 10 } as Job }]),
+    { label: 'gated, 1x', job: { name: 'gated', factor: 1 } },
   ]
-  const rows = [['model, size', 'output', 'objects', 'tenants', 'tuples', 'seconds', 'tuples / second', 'peak memory (MB)', 'file (MB)', 'rule violations', 'depth reached / asked']]
+  const rows = [['model, size', 'objects', 'tenants', 'tuples', 'seconds', 'tuples / second', 'peak memory (MB)', 'CSV size (MB)', 'rows re-read from the file', 'rows the model does not allow', 'rule violations', 'depth reached / asked']]
   for (const { label, job } of jobs) {
-    process.stderr.write(`scale: ${label} (${job.sink})\n`)
+    process.stderr.write(`scale: ${label}\n`)
     const run = spawnSync(process.execPath, ['--import', 'tsx', fileURLToPath(import.meta.url), '--child', JSON.stringify(job)], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
     const last = run.stdout.trim().split('\n').pop() ?? ''
     if (run.status !== 0 || !last.startsWith('{')) {
       failed = true
-      rows.push([label, job.sink, 'failed', '', '', '', '', '', '', '', (run.stderr || run.stdout).trim().split('\n').pop()?.slice(0, 80) ?? '', ''])
+      rows.push([label, 'failed', '', '', '', '', '', '', '', '', (run.stderr || run.stdout).trim().split('\n').pop()?.slice(0, 80) ?? '', ''])
       continue
     }
     const x = JSON.parse(last)
-    if (x.violations) failed = true
-    rows.push([label, job.sink === 'file' ? 'CSV file' : 'not saved', num(x.objects), num(x.tenants), num(x.tuples), x.seconds.toFixed(1), num(x.tuples / x.seconds), num(x.peakRssMb), x.fileMb === undefined ? '-' : num(x.fileMb), String(x.violations), x.depth || '-'])
+    if (x.violations || x.notAllowed || x.rows !== x.tuples) failed = true
+    rows.push([label, num(x.objects), num(x.tenants), num(x.tuples), x.seconds.toFixed(1), num(x.tuples / x.seconds), num(x.peakRssMb), num(x.fileMb), num(x.rows), num(x.notAllowed), String(x.violations), x.depth || '-'])
   }
   console.log('## Scale and speed\n')
   console.log(md(rows))
-  console.log('\n"Not saved" rows generate every tuple and format it as CSV, then throw it away instead of writing a file. Each row is a new process.\n')
+  console.log('\nEvery row writes the whole CSV to disk, then re-reads the file line by line and counts the rows. The file is deleted afterwards. Seconds include writing the file. Each row is a new process.\n')
 }
 
 const hash = (lines: string[]) => createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 16)
@@ -140,12 +180,7 @@ function auditFile() {
   generate(c, resolve(c, cfg), { sink })
   sink.close()
 
-  const allowed = new Set<string>()
-  for (const d of c.model.type_definitions) {
-    for (const [rel, meta] of Object.entries<any>(d.metadata?.relations ?? {})) {
-      for (const t of meta.directly_related_user_types ?? []) allowed.add(`${d.type}#${rel}@${t.type}#${t.relation ?? ''}`)
-    }
-  }
+  const allowed = allowedKeys(c.model)
   const rows = readFileSync(path, 'utf8').split('\n')
   rows.shift()
   while (rows.length && !rows[rows.length - 1]) rows.pop()

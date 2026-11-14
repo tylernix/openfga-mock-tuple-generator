@@ -20,17 +20,17 @@ npx tsx src/cli.ts build gen.json --out tuples.csv   # the full store
 
 ## Load the tuples into FGA
 
-Works with a self-hosted [OpenFGA](https://openfga.dev) server and with Auth0 FGA. You need the same model file the config points to, and the `tuples.csv` from `build`.
+Works with any OpenFGA server: one you run yourself, or a hosted one. You need the same model file the config points to, and the `tuples.csv` from `build`.
 
 **1. Point the CLI at your server.**
 
 ```bash
-export FGA_API_URL=http://localhost:8080   # your OpenFGA or Auth0 FGA API URL
+export FGA_API_URL=http://localhost:8080   # your OpenFGA API URL
 ```
 
-For a local OpenFGA server, `docker run -p 8080:8080 -p 8081:8081 -p 3000:3000 openfga/openfga run` starts one with the default configuration. For millions of tuples, give it [Postgres or MySQL](https://openfga.dev/docs/getting-started/setup-openfga/docker).
+For a local server, `docker run -p 8080:8080 -p 8081:8081 -p 3000:3000 openfga/openfga run` starts one with the default configuration. For millions of tuples, give it [Postgres or MySQL](https://openfga.dev/docs/getting-started/setup-openfga/docker).
 
-For Auth0 FGA, create a store and a client in the [dashboard](https://dashboard.fga.dev), then pass the client's credentials to every command below with `--client-id`, `--client-secret`, `--api-token-issuer` and `--api-audience`, and use `--store-id` in place of `FGA_STORE_ID`. The CLI also reads a config file (`--config`, default `~/.fga.yaml`).
+For a hosted server, create a store and an API client in your provider's console. Pass the client's credentials to every command below with `--client-id`, `--client-secret`, `--api-token-issuer` and `--api-audience` (or `--api-token` for a bearer token), and use `--store-id` in place of `FGA_STORE_ID`. The CLI also reads a config file (`--config`, default `~/.fga.yaml`).
 
 **2. Create a store with the model.**
 
@@ -38,7 +38,7 @@ For Auth0 FGA, create a store and a client in the [dashboard](https://dashboard.
 export FGA_STORE_ID=$(fga store create --name "mock tuples" --model model.fga | jq -r .store.id)
 ```
 
-On Auth0 FGA, you made the store in the dashboard, so write the model into it instead: `fga model write --store-id <id> --file model.fga`. The same command works for an existing OpenFGA store.
+On a hosted server you made the store in the console, so write the model into it instead: `fga model write --store-id <id> --file model.fga`. The same command works for any existing store.
 
 Write the model before the tuples: the server checks every tuple against it when it is written.
 
@@ -52,10 +52,10 @@ The CSV columns are the ones `fga tuple write` expects, so no conversion is need
 
 | Target | `--max-tuples-per-write` | `--max-rps` |
 |---|---|---|
-| OpenFGA server | up to 100 (the API accepts 100 per request) | not needed |
-| Auth0 FGA | 40 (the plan limit) | at or below your plan's write rate |
+| Self-hosted OpenFGA | up to 100 (the API accepts 100 per request) | not needed |
+| Hosted OpenFGA | your provider's limit (check it; it can be lower than 100) | at or below its write rate limit |
 
-If a load stops partway, run the same command again. For a file, the CLI ignores tuples that already exist (`--on-duplicate ignore`), so it carries on where it stopped. OpenFGA servers need v1.10.0 or later for this.
+If a load stops partway, run the same command again. For a file, the CLI ignores tuples that already exist (`--on-duplicate ignore`), so it carries on where it stopped. The server must be OpenFGA v1.10.0 or later for this.
 
 **4. Spot-check it.** Pick any row from `tuples.csv` and ask the server:
 
@@ -63,14 +63,11 @@ If a load stops partway, run the same command again. For a file, the CLI ignores
 fga query check user:<id> <relation> <object_type>:<object_id>
 ```
 
-### Fit the store to the plan
+### Fit the store to your server's limits
 
-| Auth0 FGA plan | Tuples in the store | Writes per second | Tuples per write |
-|---|---|---|---|
-| Free trial | 50 thousand | 20 | 40 |
-| Enterprise | 10 million (more available to purchase) | 150 | 40 |
+A hosted server limits three things: tuples in the store, tuples per write, and writes per second. Look up the three numbers for your plan, set `--max-tuples-per-write` and `--max-rps` to match, and size the store to the first.
 
-These are from the [Auth0 FGA plans page](https://docs.fga.dev/subscription-plans). The fastest a load can run is tuples per write times writes per second, which is 6,000 tuples per second on Enterprise. So 1 million tuples take about 3 minutes, and the 10.6 million tuple gdrive store in the benchmarks below would take about 30. That is derived from the limits, not measured, and that store is over the Enterprise limit of 10 million anyway.
+The fastest a load can run is tuples per write times writes per second. As an example (not any particular provider's limits), a host that allows 40 tuples per write and 150 writes per second tops out at 6,000 tuples per second. So 1 million tuples take about 3 minutes, and the 10.6 million tuple gdrive store in the benchmarks below would take about 30. That is derived from the example limits, not measured.
 
 Use `plan gen.json --scale 0.01` to see the tuple count first. Then shrink with `build --scale`, or write a few whole tenants with `build --tenants 0,3,9`. A tenant built alone is identical to its slice of the full store.
 
@@ -78,7 +75,7 @@ Use `plan gen.json --scale 0.01` to see the tuple count first. Then shrink with 
 
 The tool's CSV was read correctly by the CLI's CSV reader, including public grants (`user:*`) and conditions. I loaded a 15,365-tuple store with both as a store file's `tuple_file` in `fga model test`, and Checks on a public grant and on a condition (allowed at `hour` 10, denied at 20) came back right.
 
-I have not run `fga tuple write` against a live server, so the flags above come from the CLI's help and the OpenFGA and Auth0 FGA docs. I also have not measured load speed, so treat the times above as the best case.
+I have not run `fga tuple write` against a live server, so the flags above come from the CLI's help and the OpenFGA docs. I also have not measured load speed, so treat the times above as the best case.
 
 ## The config
 
@@ -140,29 +137,30 @@ It proves the tuples are accepted and mean what the report says. It does not pro
 Run them yourself; every number below comes from this one command and is checked, not asserted:
 
 ```bash
-npx tsx bench/bench.ts          # a few minutes (the 10x run alone is 100 seconds); exits 1 if any check fails
-npx tsx bench/bench.ts --quick  # skips the 100-million-tuple run
+npx tsx bench/bench.ts          # about 3 minutes (2 min 49 s on the machine below); needs about 4.5 GB of free disk
+npx tsx bench/bench.ts --quick  # skips the 100-million-tuple run and the 4 GB file
 ```
 
-Measured on an Apple M3 Pro (11 cores, 18 GB), Node 24.14, OpenFGA CLI 0.8.1, 2026-11-14. One run each; speed varies by a few percent between runs. Each scale row is a separate process, so its peak memory is its own.
+Measured on an Apple M3 Pro (11 cores, 18 GB), Node 24.14, OpenFGA CLI 0.8.1, 2026-11-14. One run each; speed varies by a few percent between runs. Each scale row is a separate process, so its peak memory is its own. It is taken before the file is re-read.
 
 ### Scale and speed
 
 The model is [gdrive.fga](bench/models/gdrive.fga): organizations that contain groups, nested folders and documents, with users, group members, owners and a `but not` exclusion. Every row used the default shape numbers, with nesting depth 3.
 
-| model, size | output | objects | tenants | tuples | seconds | tuples / second | peak memory (MB) | file (MB) | rule violations | depth reached / asked |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| gdrive, 0.01x | CSV file | 23,705 | 5 | 105,465 | 0.1 | 871,612 | 96 | 4 | 0 | 3/3, 3/3 |
-| gdrive, 0.1x | CSV file | 237,050 | 50 | 1,057,488 | 1.0 | 1,020,741 | 227 | 38 | 0 | 3/3, 3/3 |
-| gdrive, 1x | CSV file | 2,370,500 | 500 | 10,579,235 | 9.9 | 1,070,773 | 288 | 406 | 0 | 3/3, 3/3 |
-| gdrive, 1x | not saved | 2,370,500 | 500 | 10,579,235 | 9.9 | 1,068,718 | 304 | - | 0 | 3/3, 3/3 |
-| gdrive, 10x | not saved | 23,705,000 | 5,000 | 105,829,695 | 99.5 | 1,064,086 | 324 | - | 0 | 3/3, 3/3 |
-| gated, 1x | CSV file | 210,200 | 200 | 335,668 | 2.7 | 124,046 | 251 | 10 | 0 | - |
+Every row writes the whole CSV to disk, then re-reads the file line by line, counts the rows and checks that each is a type restriction the model allows. The file is deleted afterwards. Seconds include writing the file.
 
-- **About a million tuples per second, flat from 1 million to 106 million tuples.** Memory does not grow with size (96 MB at 100,000 tuples, 324 MB at 106 million) because tenants are generated one at a time.
-- **"Not saved" rows generate every tuple and format it as CSV, then throw it away instead of writing a file.** I used it for the 10x store because its file would be about 4 GB (a CSV is about 40 bytes per tuple). The two 1x rows show the file makes no real difference to speed: 1,070,773 tuples per second saved, 1,068,718 not saved.
-- **The gated model ran about 9x slower per tuple** (124,000 tuples per second). It picks subjects who pass `[user] and member from org`, which means evaluating the rule per object. I expect that is the cost but did not profile it; the model also writes far fewer tuples per object.
-- **The 10x store was generated and counted, not loaded into OpenFGA.** Only pilots are loaded (below).
+| model, size | objects | tenants | tuples | seconds | tuples / second | peak memory (MB) | CSV size (MB) | rows re-read from the file | rows the model does not allow | rule violations | depth reached / asked |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| gdrive, 0.01x | 23,705 | 5 | 105,465 | 0.1 | 871,612 | 116 | 4 | 105,465 | 0 | 0 | 3/3, 3/3 |
+| gdrive, 0.1x | 237,050 | 50 | 1,057,488 | 1.0 | 1,009,053 | 227 | 38 | 1,057,488 | 0 | 0 | 3/3, 3/3 |
+| gdrive, 1x | 2,370,500 | 500 | 10,579,235 | 10.1 | 1,050,048 | 284 | 406 | 10,579,235 | 0 | 0 | 3/3, 3/3 |
+| gdrive, 10x | 23,705,000 | 5,000 | 105,829,695 | 102.8 | 1,029,111 | 329 | 4,272 | 105,829,695 | 0 | 0 | 3/3, 3/3 |
+| gated, 1x | 210,200 | 200 | 335,668 | 2.7 | 124,414 | 248 | 10 | 335,668 | 0 | 0 | - |
+
+- **About a million tuples per second, flat from 1 million to 106 million tuples.** Memory does not grow with size (116 MB at 100,000 tuples, 329 MB at 106 million) because tenants are generated one at a time.
+- **The 10x store is a real 4.3 GB file.** All 105,829,695 rows were written, then re-read, and every one is allowed by the model. A CSV is about 40 bytes per tuple.
+- **The gated model ran about 8x slower per tuple** (124,000 tuples per second). It picks subjects who pass `[user] and member from org`, which means evaluating the rule per object. I expect that is the cost but did not profile it; the model also writes far fewer tuples per object.
+- **The 10x store was written to disk and re-read, not loaded into OpenFGA.** Only pilots are loaded (below).
 
 ### Determinism
 
@@ -176,7 +174,7 @@ The model is [gdrive.fga](bench/models/gdrive.fga): organizations that contain g
 
 ### Independent check of the output file
 
-This re-reads the 1,057,488-tuple CSV and derives everything from the tuples and the model JSON. It uses none of the generator's own reports.
+This re-reads the 1,057,488-tuple CSV and derives everything from the tuples and the model JSON. It uses none of the generator's own reports. These checks keep every row in memory, so they run on this file and not the 106-million-tuple one; the scale table above re-reads every size for row count and allowed types.
 
 | check | result | detail |
 | --- | --- | --- |
@@ -205,6 +203,7 @@ Verifying is the slow part, not generating: 27,069 tuples take 6 seconds to chec
 ### What these do not show
 
 - **Realism.** They show the store is valid, deterministic and as asked. Whether the asked numbers look like a real customer is up to your config.
+- **The rules at 106 million tuples, independently.** The 4.3 GB file is independently checked only for row count and allowed types. Depth, cycles, tenant boundaries and duplicates are checked there by the generator itself (the rule violations column, 0), and independently only on the 1-million-tuple file.
 - **Other machines.** These are one run on one laptop. Rerun the command for yours.
 - **Load time into a real OpenFGA server.** Only the CLI's in-memory server is used.
 
