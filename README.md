@@ -93,12 +93,12 @@ The model is [gdrive.fga](bench/models/gdrive.fga): organizations that contain g
 | gdrive, 0.01x | CSV file | 23,705 | 5 | 105,465 | 0.1 | 871,612 | 96 | 4 | 0 | 3/3, 3/3 |
 | gdrive, 0.1x | CSV file | 237,050 | 50 | 1,057,488 | 1.0 | 1,020,741 | 227 | 38 | 0 | 3/3, 3/3 |
 | gdrive, 1x | CSV file | 2,370,500 | 500 | 10,579,235 | 9.9 | 1,070,773 | 288 | 406 | 0 | 3/3, 3/3 |
-| gdrive, 1x | /dev/null | 2,370,500 | 500 | 10,579,235 | 9.9 | 1,068,718 | 304 | - | 0 | 3/3, 3/3 |
-| gdrive, 10x | /dev/null | 23,705,000 | 5,000 | 105,829,695 | 99.5 | 1,064,086 | 324 | - | 0 | 3/3, 3/3 |
+| gdrive, 1x | not saved | 2,370,500 | 500 | 10,579,235 | 9.9 | 1,068,718 | 304 | - | 0 | 3/3, 3/3 |
+| gdrive, 10x | not saved | 23,705,000 | 5,000 | 105,829,695 | 99.5 | 1,064,086 | 324 | - | 0 | 3/3, 3/3 |
 | gated, 1x | CSV file | 210,200 | 200 | 335,668 | 2.7 | 124,046 | 251 | 10 | 0 | - |
 
 - **About a million tuples per second, flat from 1 million to 106 million tuples.** Memory does not grow with size (96 MB at 100,000 tuples, 324 MB at 106 million) because tenants are generated one at a time.
-- **`/dev/null` means the tuples were generated and formatted as CSV, then written to `/dev/null`:** generation without the disk. Writing a CSV file costs almost nothing extra here. A CSV is about 40 bytes per tuple, so 100 million tuples is about 4 GB.
+- **"Not saved" rows generate every tuple and format it as CSV, then throw it away instead of writing a file.** I used it for the 10x store because its file would be about 4 GB (a CSV is about 40 bytes per tuple). The two 1x rows show the file makes no real difference to speed: 1,070,773 tuples per second saved, 1,068,718 not saved.
 - **The gated model ran about 9x slower per tuple** (124,000 tuples per second). It picks subjects who pass `[user] and member from org`, which means evaluating the rule per object. I expect that is the cost but did not profile it; the model also writes far fewer tuples per object.
 - **The 10x store was generated and counted, not loaded into OpenFGA.** Only pilots are loaded (below).
 

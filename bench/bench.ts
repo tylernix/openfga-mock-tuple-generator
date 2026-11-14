@@ -93,11 +93,11 @@ function scale(quick: boolean) {
     }
     const x = JSON.parse(last)
     if (x.violations) failed = true
-    rows.push([label, job.sink === 'file' ? 'CSV file' : '/dev/null', num(x.objects), num(x.tenants), num(x.tuples), x.seconds.toFixed(1), num(x.tuples / x.seconds), num(x.peakRssMb), x.fileMb === undefined ? '-' : num(x.fileMb), String(x.violations), x.depth || '-'])
+    rows.push([label, job.sink === 'file' ? 'CSV file' : 'not saved', num(x.objects), num(x.tenants), num(x.tuples), x.seconds.toFixed(1), num(x.tuples / x.seconds), num(x.peakRssMb), x.fileMb === undefined ? '-' : num(x.fileMb), String(x.violations), x.depth || '-'])
   }
   console.log('## Scale and speed\n')
   console.log(md(rows))
-  console.log('\n"/dev/null" means the tuples were generated and formatted as CSV, then written to /dev/null: generation without the disk. Each row is a new process.\n')
+  console.log('\n"Not saved" rows generate every tuple and format it as CSV, then throw it away instead of writing a file. Each row is a new process.\n')
 }
 
 const hash = (lines: string[]) => createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 16)
