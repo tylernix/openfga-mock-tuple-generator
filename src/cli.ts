@@ -21,8 +21,9 @@ const USAGE = `fga-tuple-gen: mock tuple stores for any OpenFGA model
       unless you pass --out.
   plan [config.gen.json] [--scale 0.01]
       Tenants, projected tuples per edge and warnings. Writes nothing.
-  build [config.gen.json] [--out <file>] [--format csv|jsonl|yaml] [--tenants 0,3,9] [--scale 0.01] [--report report.json]
-      Streams the store to <config id>.tuples.csv in the config's folder and prints asked versus realized.
+  build [config.gen.json] [--out <file>] [--format csv|jsonl|yaml] [--tenants 0,3,9] [--scale 0.01] [--report <file>]
+      Streams the store to <config id>.tuples.csv in the config's folder and prints what was realized per edge.
+      The full report (what was asked, the other side, clipped counts) is written beside it as <config id>.report.json.
       Exits 1 if a rule is broken.
   verify [config.gen.json] [--max-tuples 20000] [--scale 0.01] [--out <file>]
       Loads a pilot (whole tenants of the full store) into OpenFGA's in-memory server and compares answers.
@@ -177,13 +178,12 @@ async function main() {
     const sink = fileSink(out, format, format === 'yaml' ? { name: basename(modelPath), dsl: modelDsl(compiled.model) } : undefined)
     const report = generate(compiled, resolved, { sink, ...(tenants ? { tenants } : {}) })
     sink.close()
-    if (flags.has('report')) {
-      const reportPath = inDir(flags.get('report')!, runDir(configPath))
-      mkdirSync(dirname(reportPath), { recursive: true })
-      writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n')
-    }
-    console.log(formatReport(report))
-    console.log(`\nWrote ${out}. Run verify to have OpenFGA check a pilot of this store.`)
+    const reportPath = flags.has('report') ? inDir(flags.get('report')!, runDir(configPath)) : `${out.replace(/(\.tuples)?\.(csv|jsonl|yaml)$/, '')}.report.json`
+    mkdirSync(dirname(reportPath), { recursive: true })
+    writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n')
+    console.log(formatReport(report, reportPath))
+    console.log(`\nWrote ${out}`)
+    console.log('Next: verify has OpenFGA check a pilot of this store.')
     if (report.violationCount) process.exitCode = 1
     return
   }

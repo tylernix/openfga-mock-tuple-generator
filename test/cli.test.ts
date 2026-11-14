@@ -138,7 +138,7 @@ describe('the README steps, with no config file named', () => {
 
     const build = run(dir, ['build'])
     expect(build.status, build.stderr).toBe(0)
-    expect(readdirSync(join(dir, 'output', id)).sort()).toEqual([`${id}.gen.json`, `${id}.tuples.csv`])
+    expect(readdirSync(join(dir, 'output', id)).sort()).toEqual([`${id}.gen.json`, `${id}.report.json`, `${id}.tuples.csv`])
     expect(readdirSync(dir)).toEqual(['output'])
   })
 
@@ -150,7 +150,7 @@ describe('the README steps, with no config file named', () => {
     const second = run(dir, ['build'])
     expect(first.status, first.stderr).toBe(0)
     expect(second.status, second.stderr).toBe(0)
-    expect(readdirSync(join(dir, 'output', '20200101-0000')).sort()).toEqual(['20200101-0000.gen.json', '20200101-0000.tuples.csv'])
+    expect(readdirSync(join(dir, 'output', '20200101-0000')).sort()).toEqual(['20200101-0000.gen.json', '20200101-0000.report.json', '20200101-0000.tuples.csv'])
   })
 
   it('a scaled or partial build gets its own name and cannot overwrite the full store', () => {
@@ -204,6 +204,25 @@ describe('the README steps, with no config file named', () => {
     expect(plan.stdout).not.toContain('Using')
   })
 
+  it('prints a per-edge table that fits an 80-column terminal and writes the full report beside the store', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tuplegen-'))
+    dirs.push(dir)
+    const build = run(dir, ['build', join(root, 'bench', 'gdrive.gen.json'), '--scale', '0.01'])
+    expect(build.status, build.stderr).toBe(0)
+    const lines = build.stdout.split('\n')
+    const start = lines.indexOf('Realized, per edge:')
+    expect(start).toBeGreaterThan(-1)
+    const table = lines.slice(start + 1, lines.indexOf('', start + 1))
+    expect(table.length).toBeGreaterThan(10)
+    expect(Math.max(...table.map((l) => l.length))).toBeLessThanOrEqual(80)
+
+    const files = readdirSync(join(dir, 'output', 'gdrive'))
+    expect(files).toContain('gdrive.scale-0.01.report.json')
+    const report = JSON.parse(readFileSync(join(dir, 'output', 'gdrive', 'gdrive.scale-0.01.report.json'), 'utf8'))
+    expect(report.edges[0]).toHaveProperty('asked')
+    expect(build.stdout).toContain('gdrive.scale-0.01.report.json')
+  })
+
   it('finds a config left flat in output/ and builds it into its own folder', () => {
     const dir = mkdtempSync(join(tmpdir(), 'tuplegen-'))
     dirs.push(dir)
@@ -216,7 +235,7 @@ describe('the README steps, with no config file named', () => {
     const build = run(dir, ['build'])
     expect(build.status, build.stderr).toBe(0)
     expect(build.stdout).toContain(`Using ${join('output', '20200202-0000.gen.json')}`)
-    expect(readdirSync(join(dir, 'output', '20200202-0000'))).toEqual(['20200202-0000.tuples.csv'])
+    expect(readdirSync(join(dir, 'output', '20200202-0000'))).toEqual(['20200202-0000.report.json', '20200202-0000.tuples.csv'])
   })
 
   it('still finds a config left in the project folder', () => {

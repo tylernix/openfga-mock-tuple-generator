@@ -36,24 +36,25 @@ export function formatPlan(c: Compiled, r: Resolved, lay: Layout, projection: Pr
   return out.join('\n')
 }
 
-export function formatReport(report: Report): string {
+/** `detailPath` is where the full report was written; the table here is kept narrow enough for a terminal. */
+export function formatReport(report: Report, detailPath?: string): string {
   const out: string[] = []
   out.push(`${num(report.tuples)} tuples from ${num(report.tenants.generated)} of ${num(report.tenants.total)} tenant(s) in ${(report.elapsedMs / 1000).toFixed(1)}s, peak memory ${num(report.peakRssMb)} MB.`)
-  out.push('', 'Asked versus realized, per edge:')
-  const rows = [['edge', 'tuples', 'asked', 'covered', 'p50 / p90 / max', 'KS', 'other side p50 / p90 / max', 'clipped']]
+  out.push('', 'Realized, per edge:')
+  const rows = [['edge', 'tuples', 'covered', 'p50 / p90 / max', 'KS']]
   for (const e of report.edges) {
     rows.push([
       e.key,
       num(e.tuples),
-      e.asked,
       pct(e.coverage),
       e.depth ? `depth max ${e.depth.max}` : e.count ? `${e.count.p50} / ${e.count.p90} / ${e.count.max}` : '-',
       e.ks === undefined ? '-' : e.ks.toFixed(2),
-      e.other && e.other.withAny ? `${e.other.p50} / ${e.other.p90} / ${e.other.max} per ${e.other.of} (${pct(e.other.withAny / e.other.pool)} have any)` : '-',
-      e.clipped ? num(e.clipped) : '-',
     ])
   }
   out.push(table(rows))
+  if (detailPath) out.push('', `Full detail per edge: ${detailPath}`)
+  const clipped = report.edges.filter((e) => e.clipped)
+  if (clipped.length) out.push(`Clipped (wanted more than the pool holds): ${clipped.map((e) => `${e.key} ${num(e.clipped)}`).join(', ')}`)
   const nested = report.edges.filter((e) => e.depth)
   if (nested.length) {
     out.push('', 'Nesting depth, containers by their deepest object:')
@@ -63,7 +64,7 @@ export function formatReport(report: Report): string {
   out.push('', crossing.length ? `Cross-tenant tuples: ${crossing.map((e) => `${e.key} ${num(e.crossTenant)}`).join(', ')}` : 'Cross-tenant tuples: none.')
   if (report.warnings.length) out.push('', 'Warnings:', ...report.warnings.map((w) => `  - ${w}`))
   if (report.violationCount) out.push('', `VIOLATIONS (${report.violationCount}); do not use this store:`, ...report.violations.map((v) => `  - ${v}`))
-  else out.push('', 'Rules held: depth within the asked limit, no cycles, trees inside their containers, no unasked cross-tenant tuples.')
+  else out.push('', 'Rules held: depth, cycles, containers, tenant boundaries.')
   return out.join('\n')
 }
 

@@ -52,6 +52,7 @@ To skip the questions, add `--skip`: `init <model> --skip` writes the same file 
 output/20261113-0936/
   20261113-0936.gen.json        the config (init)
   20261113-0936.pilot.fga.yaml  what verify loaded into OpenFGA
+  20261113-0936.report.json     asked versus realized, per edge (build)
   20261113-0936.tuples.csv      the store (build)
 ```
 
@@ -69,7 +70,7 @@ npx tsx src/cli.ts plan
 
 ### verify
 
-`verify` uses OpenFGA to check a sample of the store. The test file it loads is kept next to the config as `20261113-0936.pilot.fga.yaml`.
+`verify` uses OpenFGA to check a sample of the store.
 
 ```bash
 npx tsx src/cli.ts verify
@@ -184,7 +185,7 @@ These are checked on every build, in a separate pass over what was written. If o
 Other properties:
 
 - **Same input, same store.** Each object's draws depend only on the seed, the edge and the object. A tenant built alone is identical to its slice of the full store, and changing one edge's settings changes no other edge's tuples.
-- **Nothing is silent.** The build report lists, per edge, asked versus realized counts, the fit (Kolmogorov-Smirnov distance), the side you did not ask for (tuples per subject), and anything clipped, skipped or dropped.
+- **Nothing is silent.** The build report lists, per edge, asked versus realized counts, the fit (Kolmogorov-Smirnov distance), the side you did not ask for (tuples per subject), and anything clipped, skipped or dropped. The terminal shows a short table of what was realized; the full report, with what was asked, is written beside the store as `<config id>.report.json`.
 - **Gated relations get subjects who pass the gate.** For `[user] and member from org`, only org members are written.
 
 ## What `verify` proves, and what it does not
