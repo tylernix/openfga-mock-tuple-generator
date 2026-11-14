@@ -2,7 +2,7 @@
 
 Builds a full-size mock tuple store for any OpenFGA model, and has OpenFGA check it.
 
-You give it a model and a config (how many of each type, and a few shape numbers per relation). It writes tuples you can load with `fga tuple write` or `fga store import`.
+You give it a model and a config (how many of each type, and a few shape numbers per relation). It writes tuples you can load with `fga tuple write` or `fga store import`; [loading them](#load-the-tuples-into-fga) comes last, after the evidence that the tuples are worth loading.
 
 It needs Node (tested on 24) and the [OpenFGA CLI](https://github.com/openfga/cli) (`fga`, tested on 0.8.1) on the PATH. No runtime dependencies; `tsx` and `vitest` run it and test it.
 
@@ -17,65 +17,6 @@ npx tsx src/cli.ts build gen.json --out tuples.csv   # the full store
 ```
 
 `init --interactive` asks for the tenant type, the counts and the nesting depths. `build` also writes `.jsonl` and a `.yaml` store file, and takes `--tenants 0,3,9` to write only those tenants, or `--scale 0.01` to shrink every count to 1%.
-
-## Load the tuples into FGA
-
-Works with any OpenFGA server: one you run yourself, or a hosted one. You need the same model file the config points to, and the `tuples.csv` from `build`.
-
-**1. Point the CLI at your server.**
-
-```bash
-export FGA_API_URL=http://localhost:8080   # your OpenFGA API URL
-```
-
-For a local server, `docker run -p 8080:8080 -p 8081:8081 -p 3000:3000 openfga/openfga run` starts one with the default configuration. For millions of tuples, give it [Postgres or MySQL](https://openfga.dev/docs/getting-started/setup-openfga/docker).
-
-For a hosted server, create a store and an API client in your provider's console. Pass the client's credentials to every command below with `--client-id`, `--client-secret`, `--api-token-issuer` and `--api-audience` (or `--api-token` for a bearer token), and use `--store-id` in place of `FGA_STORE_ID`. The CLI also reads a config file (`--config`, default `~/.fga.yaml`).
-
-**2. Create a store with the model.**
-
-```bash
-export FGA_STORE_ID=$(fga store create --name "mock tuples" --model model.fga | jq -r .store.id)
-```
-
-On a hosted server you made the store in the console, so write the model into it instead: `fga model write --store-id <id> --file model.fga`. The same command works for any existing store.
-
-Write the model before the tuples: the server checks every tuple against it when it is written.
-
-**3. Write the tuples.**
-
-```bash
-fga tuple write --file tuples.csv --max-tuples-per-write 100 --max-parallel-requests 10 --hide-imported-tuples
-```
-
-The CSV columns are the ones `fga tuple write` expects, so no conversion is needed. The default is 1 tuple per request, which is very slow for a large file, so always set `--max-tuples-per-write`.
-
-| Target | `--max-tuples-per-write` | `--max-rps` |
-|---|---|---|
-| Self-hosted OpenFGA | up to 100 (the API accepts 100 per request) | not needed |
-| Hosted OpenFGA | your provider's limit (check it; it can be lower than 100) | at or below its write rate limit |
-
-If a load stops partway, run the same command again. For a file, the CLI ignores tuples that already exist (`--on-duplicate ignore`), so it carries on where it stopped. The server must be OpenFGA v1.10.0 or later for this.
-
-**4. Spot-check it.** Pick any row from `tuples.csv` and ask the server:
-
-```bash
-fga query check user:<id> <relation> <object_type>:<object_id>
-```
-
-### Fit the store to your server's limits
-
-A hosted server limits three things: tuples in the store, tuples per write, and writes per second. Look up the three numbers for your plan, set `--max-tuples-per-write` and `--max-rps` to match, and size the store to the first.
-
-The fastest a load can run is tuples per write times writes per second. As an example (not any particular provider's limits), a host that allows 40 tuples per write and 150 writes per second tops out at 6,000 tuples per second. So 1 million tuples take about 3 minutes, and the 10.6 million tuple gdrive store in the benchmarks below would take about 30. That is derived from the example limits, not measured.
-
-Use `plan gen.json --scale 0.01` to see the tuple count first. Then shrink with `build --scale`, or write a few whole tenants with `build --tenants 0,3,9`. A tenant built alone is identical to its slice of the full store.
-
-### What has been tested
-
-The tool's CSV was read correctly by the CLI's CSV reader, including public grants (`user:*`) and conditions. I loaded a 15,365-tuple store with both as a store file's `tuple_file` in `fga model test`, and Checks on a public grant and on a condition (allowed at `hour` 10, denied at 20) came back right.
-
-I have not run `fga tuple write` against a live server, so the flags above come from the CLI's help and the OpenFGA docs. I also have not measured load speed, so treat the times above as the best case.
 
 ## The config
 
@@ -104,9 +45,32 @@ Per edge:
 
 The defaults are guesses. They are written into the config so you see them and change them.
 
+## How it works, and why you can trust it
+
+The model already says which tuples are legal. The tool reads that, builds the store one tenant at a time, and checks its own work. Each step below says what it does and why that makes the output trustworthy. The evidence is in [Benchmarks](#benchmarks).
+
+1. **Read the model.** Every direct type restriction becomes an *edge*, one way a tuple can be written: `document#viewer: [user, group#member]` is two edges. Each edge is classified by how the model uses it: a *container* link (followed by `from`, pointing at a place such as a folder or an organization), *nesting* (a type inside itself, like `folder#parent`), an *assignment* (people or groups given a relation), a *block* (only used on the right of `but not`), or a *wildcard* (a public grant).
+   *Why it works:* tuples come only from the model's own type restrictions, so the tool cannot write a tuple the model does not allow, and it does not need a hand-written generator per model.
+2. **Split by tenant before writing anything.** It picks the tenant type (an organization, a site; you can name it in the config) and gives every object a tenant. Both ends of a tuple come from the same tenant unless an edge sets `crossTenant`.
+   *Why it works:* picking users, groups and folders at random across a whole store links everyone to everything. Real stores are many organizations that mostly do not touch, and this keeps that shape.
+3. **Write in dependency order.** Containers go first, outermost first (a folder's organization before a document's folder), so an object can follow its container upward. Each type's nesting is built right after its own container links, so a tree can stay inside its container. Assignments, public grants and exclusions come after. A relation whose rule is an intersection, such as `[user] and member from org`, waits for the relations that rule reads, and only subjects who pass the rule are written.
+   *Why it works:* otherwise random subjects almost never pass an intersection, and the relation ends up empty.
+4. **Build trees level by level.** The nested objects in a container are split into levels with at least one object each, and each object picks its parent from the level above. A nested object also takes the same containers as its parent.
+   *Why it works:* a tree built this way is never deeper than the `depth` you asked for and cannot contain a cycle. It is exactly that deep when its container has at least `depth + 1` nested objects; smaller containers get shallower trees, and the report lists them. Picking a random earlier object as the parent gives a depth nobody chose: a simple generator that did that reached 22 to 24 levels at 200,000 folders in a test.
+5. **Draw every number from the object it is for.** Each random draw comes from a stream keyed by the seed, the edge and the object's index, not from one shared stream.
+   *Why it works:* the same config writes the same store (the benchmarks compare hashes), a tenant built alone is identical to its slice of the full store, and changing one edge's settings changes no other edge's tuples.
+6. **Stream it, tenant by tenant.** Only the tenant being built is held in memory, and tuples are written out as they are made.
+   *Why it works:* memory depends on the largest tenant, not on the size of the store. The 106 million tuple store ran in 329 MB, against 116 MB for a 100,000 tuple one.
+7. **Check its own work.** After each tenant, a separate pass re-derives depth, cycles, containers and tenant crossings from the parent and container choices behind the tuples it wrote, and the build compares the realized counts with what you asked for. A broken rule fails the build.
+   *Why it works:* the rules are checked on the result, not assumed from the code that made it. The benchmarks go further and re-read a written file with code that shares nothing with the generator.
+8. **Have OpenFGA check a pilot.** `verify` writes a few whole tenants into the CLI's in-memory OpenFGA and compares its answers with the tool's own.
+   *Why it works:* an independent implementation agrees on who can access what.
+
+What none of this decides is whether the shape matches your customers. The counts and spreads in the config are yours, and the defaults are guesses.
+
 ## What it guarantees
 
-These are re-derived from the written tuples on every build. If one fails, the build exits 1.
+These are checked on every build, in a separate pass over what was written. If one fails, the build exits 1.
 
 - No tree is deeper than the asked `depth`, and none has a cycle.
 - A nested object is in the same containers as its parent.
@@ -206,6 +170,65 @@ Verifying is the slow part, not generating: 27,069 tuples take 6 seconds to chec
 - **The rules at 106 million tuples, independently.** The 4.3 GB file is independently checked only for row count and allowed types. Depth, cycles, tenant boundaries and duplicates are checked there by the generator itself (the rule violations column, 0), and independently only on the 1-million-tuple file.
 - **Other machines.** These are one run on one laptop. Rerun the command for yours.
 - **Load time into a real OpenFGA server.** Only the CLI's in-memory server is used.
+
+## Load the tuples into FGA
+
+Everything above ran against the CLI's in-memory OpenFGA. This is how to put the tuples into a server you run or one that is hosted for you. It works with any OpenFGA server. You need the same model file the config points to, and the `tuples.csv` from `build`.
+
+**1. Point the CLI at your server.**
+
+```bash
+export FGA_API_URL=http://localhost:8080   # your OpenFGA API URL
+```
+
+For a local server, `docker run -p 8080:8080 -p 8081:8081 -p 3000:3000 openfga/openfga run` starts one with the default configuration. For millions of tuples, give it [Postgres or MySQL](https://openfga.dev/docs/getting-started/setup-openfga/docker).
+
+For a hosted server, create a store and an API client in your provider's console. Pass the client's credentials to every command below with `--client-id`, `--client-secret`, `--api-token-issuer` and `--api-audience` (or `--api-token` for a bearer token), and use `--store-id` in place of `FGA_STORE_ID`. The CLI also reads a config file (`--config`, default `~/.fga.yaml`).
+
+**2. Create a store with the model.**
+
+```bash
+export FGA_STORE_ID=$(fga store create --name "mock tuples" --model model.fga | jq -r .store.id)
+```
+
+On a hosted server you made the store in the console, so write the model into it instead: `fga model write --store-id <id> --file model.fga`. The same command works for any existing store.
+
+Write the model before the tuples: the server checks every tuple against it when it is written.
+
+**3. Write the tuples.**
+
+```bash
+fga tuple write --file tuples.csv --max-tuples-per-write 100 --max-parallel-requests 10 --hide-imported-tuples
+```
+
+The CSV columns are the ones `fga tuple write` expects, so no conversion is needed. The default is 1 tuple per request, which is very slow for a large file, so always set `--max-tuples-per-write`.
+
+| Target | `--max-tuples-per-write` | `--max-rps` |
+|---|---|---|
+| Self-hosted OpenFGA | up to 100 (the API accepts 100 per request) | not needed |
+| Hosted OpenFGA | your provider's limit (check it; it can be lower than 100) | at or below its write rate limit |
+
+If a load stops partway, run the same command again. For a file, the CLI ignores tuples that already exist (`--on-duplicate ignore`), so it carries on where it stopped. The server must be OpenFGA v1.10.0 or later for this.
+
+**4. Spot-check it.** Pick any row from `tuples.csv` and ask the server:
+
+```bash
+fga query check user:<id> <relation> <object_type>:<object_id>
+```
+
+### Fit the store to your server's limits
+
+A hosted server limits three things: tuples in the store, tuples per write, and writes per second. Look up the three numbers for your plan, set `--max-tuples-per-write` and `--max-rps` to match, and size the store to the first.
+
+The fastest a load can run is tuples per write times writes per second. As an example (not any particular provider's limits), a host that allows 40 tuples per write and 150 writes per second tops out at 6,000 tuples per second. So 1 million tuples take about 3 minutes, and the 10.6 million tuple gdrive store in the benchmarks above would take about 30. That is derived from the example limits, not measured.
+
+Use `plan gen.json --scale 0.01` to see the tuple count first. Then shrink with `build --scale`, or write a few whole tenants with `build --tenants 0,3,9`. A tenant built alone is identical to its slice of the full store.
+
+### What has been tested
+
+The tool's CSV was read correctly by the CLI's CSV reader, including public grants (`user:*`) and conditions. I loaded a 15,365-tuple store with both as a store file's `tuple_file` in `fga model test`, and Checks on a public grant and on a condition (allowed at `hour` 10, denied at 20) came back right.
+
+I have not run `fga tuple write` against a live server, so the flags above come from the CLI's help and the OpenFGA docs. I also have not measured load speed, so treat the times above as the best case.
 
 ## Tests
 
