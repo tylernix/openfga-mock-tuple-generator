@@ -223,6 +223,17 @@ describe('the README steps, with no config file named', () => {
     expect(build.stdout).toContain('gdrive.scale-0.01.report.json')
   })
 
+  it('shows each default as [default: N], and Enter writes exactly that number', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tuplegen-'))
+    dirs.push(dir)
+    const init = run(dir, ['init', simple, '--out', 'd.gen.json'], 'organization\n\n\n\n')
+    expect(init.status, init.stderr).toBe(0)
+    expect(init.stdout).toContain('How many user objects in the whole store? [default: 10,000]: 10,000')
+    expect(init.stdout).toContain('How many document objects in the whole store? [default: 100,000]: 100,000')
+    const config = JSON.parse(readFileSync(join(dir, 'output', 'd', 'd.gen.json'), 'utf8'))
+    expect(config.counts).toEqual({ user: 10000, organization: 100, document: 100000 })
+  })
+
   it('finds a config left flat in output/ and builds it into its own folder', () => {
     const dir = mkdtempSync(join(tmpdir(), 'tuplegen-'))
     dirs.push(dir)

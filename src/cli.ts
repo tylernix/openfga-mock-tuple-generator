@@ -83,7 +83,7 @@ async function interview(cfg: Config, c: Compiled): Promise<void> {
       rl = createInterface({ input: process.stdin, output: process.stdout, terminal: false })
       lines = rl[Symbol.asyncIterator]()
     }
-    process.stdout.write(`${question} [${fallback}]: `)
+    process.stdout.write(`${question} [default: ${fallback}]: `)
     const next = await lines!.next()
     const answer = next.done ? '' : next.value.trim()
     // A terminal echoes what you type; piped answers are echoed so the transcript reads.
@@ -101,7 +101,7 @@ async function interview(cfg: Config, c: Compiled): Promise<void> {
     }
   }
 
-  console.log(terminal ? 'Use the arrow keys and Enter to choose. For numbers, type one, or press Enter to take the default in [brackets].' : 'Answer each question, or press Enter to take the default in [brackets].')
+  console.log(terminal ? 'Use the arrow keys and Enter to choose. For numbers, type one, or press Enter to use the [default: ...] shown.' : 'Answer each question, or press Enter to use the [default: ...] shown.')
   console.log('The shape of each relation (how many per object) is left at its default: edit "edges" in the file it writes.\n')
   try {
     // Types with no relations (users) cannot contain anything, so they are not offered.

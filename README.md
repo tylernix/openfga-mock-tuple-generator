@@ -21,7 +21,11 @@ npx tsx src/cli.ts build
 
 ### init
 
-`init` asks a few questions and builds your config file. Press Enter to take the default in brackets.
+```bash
+npx tsx src/cli.ts init bench/models/simple.fga
+```
+
+`init` asks a few questions and builds your config file. Each number question shows its default, like `[default: 100,000]`; press Enter to use it.
 
 [simple.fga](bench/models/simple.fga) is a small team document app. Users belong to organizations, every document is in one organization and has an owner, and a document can be viewed by its owner, by people it is shared with, or by every member of its organization:
 
