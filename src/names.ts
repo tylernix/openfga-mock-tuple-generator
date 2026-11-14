@@ -4,9 +4,17 @@ import { basename, join } from 'node:path'
 /** Every file a run writes goes here, so the project folder stays clean. */
 export const OUTPUT_DIR = 'output'
 
-/** A bare name (tuples.csv) lands in output/. A path with a folder in it (./tuples.csv, /tmp/x.csv) is used as given. */
-export function inOutput(path: string): string {
-  return basename(path) === path ? join(OUTPUT_DIR, path) : path
+/** The id a config carries in its name: 20261113-2149 for 20261113-2149.gen.json. Everything built from it is named after it, whenever it is built. */
+export function planId(configPath: string): string {
+  return basename(configPath).replace(/\.json$/, '').replace(/\.gen$/, '')
+}
+
+/** The folder holding a config and everything built from it: output/20261113-2149. */
+export const runDir = (configPath: string) => join(OUTPUT_DIR, planId(configPath))
+
+/** A bare name (tuples.csv) lands in `dir`. A path with a folder in it (./tuples.csv, /tmp/x.csv) is used as given. */
+export function inDir(path: string, dir: string): string {
+  return basename(path) === path ? join(dir, path) : path
 }
 
 /** Local date and time to the minute, like 20261113-0936. */
@@ -15,23 +23,13 @@ export function stamp(now = new Date()): string {
   return `${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}-${two(now.getHours())}${two(now.getMinutes())}`
 }
 
-/** `<stamp><ext>` that is not taken in `dir`: 20261113-0936, then 20261113-0936-2 within the same minute. */
-function freeName(ext: string, dir: string, now: Date, exists: (path: string) => boolean): string {
+/** A new plan id whose folder is not taken in `dir`: 20261113-0936, then 20261113-0936-2 within the same minute. */
+export function newPlanId(dir = OUTPUT_DIR, now = new Date(), exists: (path: string) => boolean = existsSync): string {
   const base = stamp(now)
   for (let n = 1; ; n++) {
-    const name = `${base}${n === 1 ? '' : `-${n}`}${ext}`
-    if (!exists(join(dir, name))) return name
+    const id = n === 1 ? base : `${base}-${n}`
+    if (!exists(join(dir, id))) return id
   }
-}
-
-/** A config file name that is not taken yet: 20261113-0936.gen.json, then 20261113-0936-2.gen.json within the same minute. */
-export function newConfigName(dir = OUTPUT_DIR, now = new Date(), exists: (path: string) => boolean = existsSync): string {
-  return freeName('.gen.json', dir, now, exists)
-}
-
-/** The id a config carries in its name: 20261113-2149 for 20261113-2149.gen.json. Everything built from it is named after it, whenever it is built. */
-export function planId(configPath: string): string {
-  return basename(configPath).replace(/\.json$/, '').replace(/\.gen$/, '')
 }
 
 export interface ConfigFile {
@@ -44,8 +42,14 @@ const isConfig = (name: string) => name === 'gen.json' || name.endsWith('.gen.js
 const listConfigs = (dir: string): ConfigFile[] =>
   existsSync(dir) ? readdirSync(dir).filter(isConfig).map((name) => ({ name, modified: statSync(join(dir, name)).mtimeMs })) : []
 
-/** The config to use when none is named: the most recently modified `gen.json` or `*.gen.json` in output/, else in the current folder. */
-export function latestConfig(dirs: string[] = [OUTPUT_DIR, '.'], list: (dir: string) => ConfigFile[] = listConfigs): string | undefined {
+/** Where configs can be: each run folder in output/, then output/ itself, then the current folder. */
+export function configDirs(): string[] {
+  const runs = existsSync(OUTPUT_DIR) ? readdirSync(OUTPUT_DIR, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => join(OUTPUT_DIR, d.name)) : []
+  return [...runs, OUTPUT_DIR, '.']
+}
+
+/** The config to use when none is named: the most recently modified `gen.json` or `*.gen.json` in the places above. */
+export function latestConfig(dirs: string[] = configDirs(), list: (dir: string) => ConfigFile[] = listConfigs): string | undefined {
   const configs = dirs.flatMap((dir) => list(dir).filter((f) => isConfig(f.name)).map((f) => ({ ...f, dir })))
   // Equal times (two inits in one minute) fall back to the suffix number, so -2 comes after the first.
   configs.sort((a, b) => b.modified - a.modified || suffix(b.name) - suffix(a.name) || b.name.localeCompare(a.name))

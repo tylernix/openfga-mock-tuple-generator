@@ -1,10 +1,10 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { inOutput, latestConfig, newConfigName, planId, stamp } from '../src/names.js'
+import { inDir, latestConfig, newPlanId, planId, runDir, stamp } from '../src/names.js'
 import { moveSelection, parseCount, visibleWindow } from '../src/prompt.js'
 
 describe('config names', () => {
@@ -14,10 +14,10 @@ describe('config names', () => {
     expect(stamp(at)).toBe('20261113-0905')
   })
 
-  it('adds a number when the name is taken, so two inits in one minute do not collide', () => {
-    const taken = new Set([join('.', '20261113-0905.gen.json'), join('.', '20261113-0905-2.gen.json')])
-    expect(newConfigName('.', at, (p) => taken.has(p))).toBe('20261113-0905-3.gen.json')
-    expect(newConfigName('.', at, () => false)).toBe('20261113-0905.gen.json')
+  it('adds a number when the id is taken, so two inits in one minute do not collide', () => {
+    const taken = new Set([join('.', '20261113-0905'), join('.', '20261113-0905-2')])
+    expect(newPlanId('.', at, (p) => taken.has(p))).toBe('20261113-0905-3')
+    expect(newPlanId('.', at, () => false)).toBe('20261113-0905')
   })
 
   it('picks the most recently modified config, plain gen.json included', () => {
@@ -29,26 +29,30 @@ describe('config names', () => {
     expect(latestConfig(['d'], list)).toBe(join('d', 'gen.json'))
   })
 
-  it('looks in output/ and the current folder, and takes the newest of both', () => {
+  it('looks in every run folder, output/ and the current folder, and takes the newest', () => {
     const files: Record<string, { name: string; modified: number }[]> = {
-      output: [{ name: '20261113-0905.gen.json', modified: 100 }],
+      'output/20261113-0905': [{ name: '20261113-0905.gen.json', modified: 100 }],
+      output: [],
       '.': [{ name: 'gen.json', modified: 50 }],
     }
-    expect(latestConfig(['output', '.'], (d) => files[d])).toBe(join('output', '20261113-0905.gen.json'))
+    const dirs = ['output/20261113-0905', 'output', '.']
+    expect(latestConfig(dirs, (d) => files[d])).toBe(join('output/20261113-0905', '20261113-0905.gen.json'))
     files['.'][0].modified = 500
-    expect(latestConfig(['output', '.'], (d) => files[d])).toBe(join('.', 'gen.json'))
+    expect(latestConfig(dirs, (d) => files[d])).toBe(join('.', 'gen.json'))
   })
 
-  it('puts a bare name in output/ and leaves a path with a folder alone', () => {
-    expect(inOutput('tuples.csv')).toBe(join('output', 'tuples.csv'))
-    expect(inOutput('./tuples.csv')).toBe('./tuples.csv')
-    expect(inOutput('/tmp/tuples.csv')).toBe('/tmp/tuples.csv')
+  it('puts a bare name in the given folder and leaves a path with a folder alone', () => {
+    expect(inDir('tuples.csv', 'output/x')).toBe(join('output/x', 'tuples.csv'))
+    expect(inDir('./tuples.csv', 'output/x')).toBe('./tuples.csv')
+    expect(inDir('/tmp/tuples.csv', 'output/x')).toBe('/tmp/tuples.csv')
   })
 
-  it('names a store after its config, not the clock', () => {
-    expect(planId('output/20261113-2149.gen.json')).toBe('20261113-2149')
+  it('names a store and its folder after the config, not the clock', () => {
+    expect(planId('output/20261113-2149/20261113-2149.gen.json')).toBe('20261113-2149')
     expect(planId('20261113-2149-2.gen.json')).toBe('20261113-2149-2')
     expect(planId('gen.json')).toBe('gen')
+    expect(runDir('output/20261113-2149/20261113-2149.gen.json')).toBe(join('output', '20261113-2149'))
+    expect(runDir('bench/simple.gen.json')).toBe(join('output', 'simple'))
   })
 
   it('breaks a tie by name, numbers compared as numbers', () => {
@@ -114,26 +118,27 @@ describe('the README steps, with no config file named', () => {
     return spawnSync(tsx, [cli, ...args], { cwd, input, encoding: 'utf8' })
   }
 
-  it('init writes a timestamped file that plan and build then use by themselves', () => {
+  it('init writes a timestamped config in its own folder that plan and build then use by themselves', () => {
     const dir = mkdtempSync(join(tmpdir(), 'tuplegen-'))
     dirs.push(dir)
 
     const init = run(dir, ['init', simple], 'organization\n500\n5\n1000\n')
     expect(init.status, init.stderr).toBe(0)
     expect(readdirSync(dir)).toEqual(['output'])
-    const files = readdirSync(join(dir, 'output')).filter((f) => f.endsWith('.gen.json'))
-    expect(files).toHaveLength(1)
-    expect(files[0]).toMatch(/^\d{8}-\d{4}\.gen\.json$/)
-    expect(init.stdout).toContain(`Wrote ${join('output', files[0])}`)
-    const id = files[0].replace('.gen.json', '')
+    const runs = readdirSync(join(dir, 'output'))
+    expect(runs).toHaveLength(1)
+    const id = runs[0]
+    expect(id).toMatch(/^\d{8}-\d{4}$/)
+    expect(readdirSync(join(dir, 'output', id))).toEqual([`${id}.gen.json`])
+    expect(init.stdout).toContain(`Wrote ${join('output', id, `${id}.gen.json`)}`)
 
     const plan = run(dir, ['plan'])
     expect(plan.status, plan.stderr).toBe(0)
-    expect(plan.stdout).toContain(`Using ${join('output', files[0])}`)
+    expect(plan.stdout).toContain(`Using ${join('output', id, `${id}.gen.json`)}`)
 
     const build = run(dir, ['build'])
     expect(build.status, build.stderr).toBe(0)
-    expect(readdirSync(join(dir, 'output'))).toContain(`${id}.tuples.csv`)
+    expect(readdirSync(join(dir, 'output', id)).sort()).toEqual([`${id}.gen.json`, `${id}.tuples.csv`])
     expect(readdirSync(dir)).toEqual(['output'])
   })
 
@@ -145,8 +150,7 @@ describe('the README steps, with no config file named', () => {
     const second = run(dir, ['build'])
     expect(first.status, first.stderr).toBe(0)
     expect(second.status, second.stderr).toBe(0)
-    const stores = readdirSync(join(dir, 'output')).filter((f) => f.endsWith('.tuples.csv'))
-    expect(stores).toEqual(['20200101-0000.tuples.csv'])
+    expect(readdirSync(join(dir, 'output', '20200101-0000')).sort()).toEqual(['20200101-0000.gen.json', '20200101-0000.tuples.csv'])
   })
 
   it('a scaled or partial build gets its own name and cannot overwrite the full store', () => {
@@ -155,29 +159,29 @@ describe('the README steps, with no config file named', () => {
     run(dir, ['init', simple, '--skip', '--out', '20200101-0000.gen.json'])
     expect(run(dir, ['build', '--scale', '0.01']).status).toBe(0)
     expect(run(dir, ['build', '--tenants', '0,1']).status).toBe(0)
-    expect(readdirSync(join(dir, 'output')).filter((f) => f.endsWith('.tuples.csv')).sort()).toEqual([
+    expect(readdirSync(join(dir, 'output', '20200101-0000')).filter((f) => f.endsWith('.tuples.csv')).sort()).toEqual([
       '20200101-0000.scale-0.01.tuples.csv',
       '20200101-0000.tenants-0-1.tuples.csv',
     ])
   })
 
-  it('an explicit --out bare name lands in output/, a path with a folder is used as given', () => {
+  it('an explicit --out bare name lands in the config folder, a path with a folder is used as given', () => {
     const dir = mkdtempSync(join(tmpdir(), 'tuplegen-'))
     dirs.push(dir)
     run(dir, ['init', simple, '--skip', '--out', 'a.gen.json'])
     expect(run(dir, ['build', '--out', 'mine.csv']).status).toBe(0)
     expect(run(dir, ['build', '--out', './here.csv']).status).toBe(0)
-    expect(readdirSync(join(dir, 'output'))).toContain('mine.csv')
+    expect(readdirSync(join(dir, 'output', 'a'))).toContain('mine.csv')
     expect(readdirSync(dir)).toContain('here.csv')
   })
 
-  it('verify keeps its pilot file in output/, named after the config', () => {
+  it('verify keeps its pilot file in the config folder, named after the config', () => {
     const dir = mkdtempSync(join(tmpdir(), 'tuplegen-'))
     dirs.push(dir)
     run(dir, ['init', simple, '--skip', '--out', '20200101-0000.gen.json'])
     const verify = run(dir, ['verify', '--max-tuples', '3000'])
     expect(verify.status, verify.stdout + verify.stderr).toBe(0)
-    expect(readdirSync(join(dir, 'output'))).toContain('20200101-0000.pilot.fga.yaml')
+    expect(readdirSync(join(dir, 'output', '20200101-0000'))).toContain('20200101-0000.pilot.fga.yaml')
   })
 
   it('--skip asks nothing, even when it comes before the model', () => {
@@ -186,18 +190,33 @@ describe('the README steps, with no config file named', () => {
     const init = run(dir, ['init', '--skip', simple, '--out', 'x.gen.json'])
     expect(init.status, init.stderr).toBe(0)
     expect(init.stdout).not.toContain('Which type is a tenant')
-    expect(readdirSync(join(dir, 'output'))).toContain('x.gen.json')
+    expect(readdirSync(join(dir, 'output', 'x'))).toContain('x.gen.json')
   })
 
-  it('the file you name wins over the newest one, and a bare name is found in output/', () => {
+  it('the file you name wins over the newest one, and a bare name is found in its folder', () => {
     const dir = mkdtempSync(join(tmpdir(), 'tuplegen-'))
     dirs.push(dir)
     run(dir, ['init', simple, '--skip', '--out', 'mine.gen.json'])
     run(dir, ['init', simple, '--skip', '--out', 'newer.gen.json'])
-    utimesSync(join(dir, 'output', 'newer.gen.json'), new Date(), new Date(Date.now() + 60_000))
+    utimesSync(join(dir, 'output', 'newer', 'newer.gen.json'), new Date(), new Date(Date.now() + 60_000))
     const plan = run(dir, ['plan', 'mine.gen.json'])
     expect(plan.status, plan.stderr).toBe(0)
     expect(plan.stdout).not.toContain('Using')
+  })
+
+  it('finds a config left flat in output/ and builds it into its own folder', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tuplegen-'))
+    dirs.push(dir)
+    run(dir, ['init', simple, '--skip', '--out', './seed.gen.json'])
+    mkdirSync(join(dir, 'output'))
+    // The model path is relative to the config, so point it at the model before moving the file.
+    const config = { ...JSON.parse(readFileSync(join(dir, 'seed.gen.json'), 'utf8')), model: simple }
+    writeFileSync(join(dir, 'output', '20200202-0000.gen.json'), JSON.stringify(config))
+    rmSync(join(dir, 'seed.gen.json'))
+    const build = run(dir, ['build'])
+    expect(build.status, build.stderr).toBe(0)
+    expect(build.stdout).toContain(`Using ${join('output', '20200202-0000.gen.json')}`)
+    expect(readdirSync(join(dir, 'output', '20200202-0000'))).toEqual(['20200202-0000.tuples.csv'])
   })
 
   it('still finds a config left in the project folder', () => {

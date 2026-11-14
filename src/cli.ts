@@ -5,7 +5,7 @@ import { createInterface } from 'node:readline/promises'
 import { defaultConfig, resolve, scaled, type Config } from './config.js'
 import { generate, layout, project } from './generate.js'
 import { compile, loadModel, modelDsl, type Compiled } from './model.js'
-import { inOutput, latestConfig, newConfigName, OUTPUT_DIR, planId } from './names.js'
+import { inDir, latestConfig, newPlanId, OUTPUT_DIR, planId, runDir } from './names.js'
 import { fileSink, type Format } from './output.js'
 import { parseCount, select } from './prompt.js'
 import { formatPlan, formatReport, formatVerdict } from './report.js'
@@ -17,17 +17,19 @@ const USAGE = `fga-tuple-gen: mock tuple stores for any OpenFGA model
   init <model.fga|model.json> [--out <file>] [--skip] [--force]
       Asks a few questions, then writes a config with every type and edge, defaults filled in, and the question each edge answers.
       --skip asks nothing and writes every default.
-      The file is output/<date>-<time>.gen.json, like output/20261113-0936.gen.json, unless you pass --out.
+      The config goes in its own folder, output/<date>-<time>/<date>-<time>.gen.json, like output/20261113-0936/20261113-0936.gen.json,
+      unless you pass --out.
   plan [config.gen.json] [--scale 0.01]
       Tenants, projected tuples per edge and warnings. Writes nothing.
   build [config.gen.json] [--out <file>] [--format csv|jsonl|yaml] [--tenants 0,3,9] [--scale 0.01] [--report report.json]
-      Streams the store to output/<config id>.tuples.csv (20261113-0936.tuples.csv for 20261113-0936.gen.json) and prints
-      asked versus realized. Exits 1 if a rule is broken.
+      Streams the store to <config id>.tuples.csv in the config's folder and prints asked versus realized.
+      Exits 1 if a rule is broken.
   verify [config.gen.json] [--max-tuples 20000] [--scale 0.01] [--out <file>]
       Loads a pilot (whole tenants of the full store) into OpenFGA's in-memory server and compares answers.
-      The test file it loads is kept as output/<config id>.pilot.fga.yaml.
+      The test file it loads is kept as <config id>.pilot.fga.yaml in the config's folder.
 
-  Every file a run writes goes in output/. A bare name after --out or --report lands there; a path with a folder is used as given.
+  Everything built from a config goes in output/<config id>/. A bare name after --out or --report lands there;
+  a path with a folder is used as given.
   plan, build and verify use the newest config in output/ (then in this folder) when you do not name one.
 `
 
@@ -49,8 +51,8 @@ function parseArgs(argv: string[]) {
 /** The config a command reads: the one named, or else the newest in output/. Says which, so it is never a surprise. */
 function configArg(positional: string[]): string {
   const named = positional[0]
-  // A bare name that is not here is looked for in output/, where init puts configs.
-  if (named) return existsSync(named) || !existsSync(inOutput(named)) ? named : inOutput(named)
+  // A bare name that is not here is looked for where init puts configs: its own folder in output/.
+  if (named) return [named, join(runDir(named), named), join(OUTPUT_DIR, named)].find((p) => existsSync(p)) ?? named
   const found = latestConfig()
   if (!found) throw new Error(`no config file. Name one, or run init first to write one in ${OUTPUT_DIR}/.`)
   console.log(`Using ${found}`)
@@ -134,7 +136,9 @@ async function main() {
   if (command === 'init') {
     const modelPath = positional[0]
     if (!modelPath) throw new Error('init needs a model file')
-    const out = flags.has('out') ? inOutput(flags.get('out')!) : join(OUTPUT_DIR, newConfigName())
+    const given = flags.get('out')
+    const id = given ? '' : newPlanId()
+    const out = given ? inDir(given, runDir(given)) : join(OUTPUT_DIR, id, `${id}.gen.json`)
     if (existsSync(out) && !flags.has('force')) throw new Error(`${out} already exists; pass --force to overwrite it`)
     const compiled = compile(loadModel(modelPath))
     const cfg = defaultConfig(compiled, relative(dirname(resolvePath(out)), resolvePath(modelPath)) || basename(modelPath))
@@ -168,13 +172,13 @@ async function main() {
     const tenants = flags.get('tenants')?.split(',').map(Number)
     // Named after the config, not the clock: the same config always lands in the same file. A scaled or partial build gets its own name so it cannot overwrite a full store.
     const name = [planId(configPath), ...(flags.has('scale') ? [`scale-${flags.get('scale')}`] : []), ...(tenants ? [`tenants-${tenants.join('-')}`] : [])].join('.')
-    const out = explicit ? inOutput(explicit) : join(OUTPUT_DIR, `${name}.tuples.${format}`)
+    const out = explicit ? inDir(explicit, runDir(configPath)) : join(runDir(configPath), `${name}.tuples.${format}`)
     mkdirSync(dirname(out), { recursive: true })
     const sink = fileSink(out, format, format === 'yaml' ? { name: basename(modelPath), dsl: modelDsl(compiled.model) } : undefined)
     const report = generate(compiled, resolved, { sink, ...(tenants ? { tenants } : {}) })
     sink.close()
     if (flags.has('report')) {
-      const reportPath = inOutput(flags.get('report')!)
+      const reportPath = inDir(flags.get('report')!, runDir(configPath))
       mkdirSync(dirname(reportPath), { recursive: true })
       writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n')
     }
@@ -187,7 +191,7 @@ async function main() {
   if (command === 'verify') {
     const configPath = configArg(positional)
     const { compiled, resolved } = load(configPath, flags)
-    const file = flags.has('out') ? inOutput(flags.get('out')!) : join(OUTPUT_DIR, `${planId(configPath)}.pilot.fga.yaml`)
+    const file = flags.has('out') ? inDir(flags.get('out')!, runDir(configPath)) : join(runDir(configPath), `${planId(configPath)}.pilot.fga.yaml`)
     const verdict = verify(compiled, resolved, { file, ...(flags.has('max-tuples') ? { maxTuples: Number(flags.get('max-tuples')) } : {}) })
     console.log(formatVerdict(verdict))
     if (!verdict.ok) process.exitCode = 1
