@@ -46,19 +46,7 @@ For your own model, put its path in place of `bench/models/simple.fga` (a `.fga`
 
 To skip the questions, add `--skip`: `init <model> --skip` writes the same file with every default, and you edit it by hand (see [The config](#the-config)).
 
-`init` names the config by date and time and puts it in its own folder in `output/`, like `output/20261113-0936/20261113-0936.gen.json`, so a second run never makes the same folder. That time is the config's id, and everything built from the config goes in the same folder, named after it:
-
-```
-output/20261113-0936/
-  20261113-0936.gen.json        the config (init)
-  20261113-0936.pilot.fga.yaml  what verify loaded into OpenFGA
-  20261113-0936.report.json     asked versus realized, per edge (build)
-  20261113-0936.tuples.csv      the store (build)
-```
-
-You don't need to type the name later: `plan`, `verify` and `build` use the newest config in `output/` and print which one (`Using output/20261113-0936/20261113-0936.gen.json`). To use another, put its name after the command (`plan 20261113-0936.gen.json` finds it in its folder).
-
-Git ignores the whole `output/` folder, so nothing a run makes is committed back into the repo. To keep a config in git (a config and its seed are what make a run repeatable), copy it out of `output/`, or write it elsewhere with a path (`init <model> --out ./my.gen.json`). A bare name after `--out` or `--report` lands in the config's folder; a path with a folder in it (`--out ./here.csv`) is used as given.
+`init` names the file by date and time, like `20261113-0936.gen.json`, so a second run never overwrites the first. You don't need to type that name later: `plan`, `verify` and `build` use the newest `*.gen.json` in the folder and print which one (`Using 20261113-0936.gen.json`). To use another, put its name after the command.
 
 ### plan
 
@@ -83,8 +71,6 @@ npx tsx src/cli.ts verify
 ```bash
 npx tsx src/cli.ts build
 ```
-
-The store is named after the config, not the clock: `20261113-0936.gen.json` always builds `20261113-0936.tuples.csv` in the same folder, whenever you run it, and a rebuild replaces the same file. Pick the format with `--format jsonl` or `--format yaml`, or name the file with `--out`. `--tenants 0,3,9` writes only those tenants, and `--scale 0.01` shrinks every count to 1%. A build with either gets its own name (`20261113-0936.scale-0.01.tuples.csv`, `20261113-0936.tenants-0-3-9.tuples.csv`), so it can't overwrite the full store.
 
 ## The config
 
@@ -185,7 +171,7 @@ These are checked on every build, in a separate pass over what was written. If o
 Other properties:
 
 - **Same input, same store.** Each object's draws depend only on the seed, the edge and the object. A tenant built alone is identical to its slice of the full store, and changing one edge's settings changes no other edge's tuples.
-- **Nothing is silent.** The build report lists, per edge, asked versus realized counts, the fit (Kolmogorov-Smirnov distance), the side you did not ask for (tuples per subject), and anything clipped, skipped or dropped. The terminal shows a short table of what was realized; the full report, with what was asked, is written beside the store as `<config id>.report.json`.
+- **Nothing is silent.** The build report lists, per edge, asked versus realized counts, the fit (Kolmogorov-Smirnov distance), the side you did not ask for (tuples per subject), and anything clipped, skipped or dropped.
 - **Gated relations get subjects who pass the gate.** For `[user] and member from org`, only org members are written.
 
 ## What `verify` proves, and what it does not
@@ -284,7 +270,7 @@ Verifying is the slow part, not generating: 27,069 tuples take 6 seconds to chec
 
 ## Load the tuples into FGA
 
-Everything above ran against the CLI's in-memory OpenFGA. This is how to put the tuples into a server you run or one that is hosted for you. It works with any OpenFGA server. You need the same model file the config points to, and the `tuples.csv` from `build` (`output/<config id>/<config id>.tuples.csv`, called `tuples.csv` below).
+Everything above ran against the CLI's in-memory OpenFGA. This is how to put the tuples into a server you run or one that is hosted for you. It works with any OpenFGA server. You need the same model file the config points to, and the `tuples.csv` from `build`.
 
 **1. Point the CLI at your server.**
 
