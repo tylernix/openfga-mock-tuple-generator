@@ -22,6 +22,53 @@ npx tsx src/cli.ts build gen.json --out tuples.csv   # the full store
 
 `gen.json` is the only input. Keep it in git with its seed: the same file always writes the same store.
 
+### The smallest config
+
+Two fields: the model file, and how many objects of each type you want.
+
+```json
+{
+  "model": "model.fga",
+  "counts": { "user": 1000, "document": 10000 }
+}
+```
+
+For this model:
+
+```
+type user
+
+type document
+  relations
+    define viewer: [user]
+```
+
+`plan`, `build` and `verify` all run on it, and OpenFGA agrees with the result. Everything you leave out gets a default: seed 1, numeric ids, the tenant type the model suggests (here the model has none, so the store is one tenant), and a default shape for every relation. That default is half of the documents with about 2 viewers each, and it is listed as a warning:
+
+```
+Warnings:
+  - No settings for document#viewer:user; used the default (assignment).
+```
+
+Every type in the model needs a count. If one is missing, the tool stops and names it (`counts.user is missing`).
+
+### One step up: set one relation
+
+To choose the shape of a relation, add it under `edges`. This gives every document exactly 3 viewers:
+
+```json
+{
+  "model": "model.fga",
+  "counts": { "user": 1000, "document": 10000 },
+  "edges": {
+    "document#viewer:user": { "coverage": 1, "count": 3 }
+  }
+}
+```
+
+`coverage` 1 means every document gets viewers, and `count` 3 means three each. Run `init model.fga` to get every relation, with its default and the question it answers, written out for you to edit.
+
+### All the fields
 | Field | Meaning |
 |---|---|
 | `counts` | Objects of each type in the whole store. |

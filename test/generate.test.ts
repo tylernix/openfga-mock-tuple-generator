@@ -3,12 +3,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { resolve, scaled } from '../src/config.js'
+import { generate } from '../src/generate.js'
 import { generationOrder } from '../src/model.js'
-import { objectOf, userOf } from '../src/output.js'
+import { memorySink, objectOf, userOf } from '../src/output.js'
 import { levelSizes, pickDistinct, rngFor } from '../src/random.js'
 import { suggestTenant } from '../src/tenants.js'
 import { verify } from '../src/verify.js'
-import { build, config, depthOf, edgeOf, line, linkMap, model } from './helpers.js'
+import { build, config, depthOf, edgeOf, fixture, line, linkMap, model } from './helpers.js'
 
 const small = { user: 600, organization: 12, group: 120, folder: 600, document: 3_000 }
 
@@ -70,6 +71,29 @@ describe('the config', () => {
 
   it('scales every count, keeping at least one of each', () => {
     expect(scaled(config('drive', { counts: small }), 0.01).counts).toEqual({ user: 6, organization: 1, group: 1, folder: 6, document: 30 })
+  })
+
+  it('needs only a model and a count per type, and says which count is missing', () => {
+    const c = model('minimal')
+    const smallest = { model: fixture('minimal'), counts: { user: 1_000, document: 10_000 } }
+    const resolved = resolve(c, smallest)
+    expect(resolved.warnings).toEqual(['No settings for document#viewer:user; used the default (assignment).'])
+    const sink = memorySink()
+    const report = generate(c, resolved, { sink })
+    expect(report.violationCount).toBe(0)
+    expect(sink.tuples.length).toBeGreaterThan(10_000)
+    expect(sink.tuples.every((t) => t.relation === 'viewer' && t.objectType === 'document' && t.userType === 'user')).toBe(true)
+    expect(() => resolve(c, { model: smallest.model, counts: { document: 10_000 } })).toThrow('counts.user is missing')
+  })
+
+  it('sets one edge on its own: exactly 3 viewers on every document', () => {
+    const c = model('minimal')
+    const sink = memorySink()
+    generate(c, resolve(c, { model: fixture('minimal'), counts: { user: 1_000, document: 10_000 }, edges: { 'document#viewer:user': { coverage: 1, count: 3 } } }), { sink })
+    const viewers = new Map<string, number>()
+    for (const t of sink.tuples) viewers.set(objectOf(t), (viewers.get(objectOf(t)) ?? 0) + 1)
+    expect(viewers.size).toBe(10_000)
+    expect([...viewers.values()].every((n) => n === 3)).toBe(true)
   })
 })
 

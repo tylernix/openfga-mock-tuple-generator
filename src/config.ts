@@ -172,7 +172,7 @@ export function resolve(c: Compiled, cfg: Config): Resolved {
   for (const e of c.edges) {
     const where = `edges["${e.key}"]`
     const given = cfg.edges?.[e.key]
-    if (!given) warnings.push(`No settings for ${e.key}; used the default for a ${e.kind} edge.`)
+    if (!given) warnings.push(`No settings for ${e.key}; used the default (${e.kind}).`)
     const input: EdgeInput = { ...defaultEdge(c, e, tenantType), ...(given ?? {}) }
     for (const field of Object.keys(given ?? {}) as (keyof EdgeInput)[]) {
       if (field === 'question' || field === 'kind') continue
