@@ -11,17 +11,13 @@ You give it a model and a config (how many of each type, and a few shape numbers
 
 ## Use it
 
-All the steps, run in order on an included sample model:
-
 ```bash
 npm install
-npx tsx src/cli.ts init bench/models/simple.fga   # answer a few questions; writes your config
-npx tsx src/cli.ts plan                           # shows tenants and tuple counts; writes nothing
-npx tsx src/cli.ts verify                         # has OpenFGA check a sample of the store
-npx tsx src/cli.ts build --out tuples.csv         # writes the full store
+npx tsx src/cli.ts init bench/models/simple.fga --skip
+npx tsx src/cli.ts plan
+npx tsx src/cli.ts verify
+npx tsx src/cli.ts build
 ```
-
-The last three read the config that `init` wrote. Each step is explained below.
 
 ### init
 
@@ -50,7 +46,9 @@ For your own model, put its path in place of `bench/models/simple.fga` (a `.fga`
 
 To skip the questions, add `--skip`: `init <model> --skip` writes the same file with every default, and you edit it by hand (see [The config](#the-config)).
 
-`init` names the file by date and time, like `20261113-0936.gen.json`, so a second run never overwrites the first. You don't need to type that name later: `plan`, `verify` and `build` use the newest `*.gen.json` in the folder and print which one (`Using 20261113-0936.gen.json`). To use another, put its name after the command.
+`init` names the file by date and time and puts it in `output/`, like `output/20261113-0936.gen.json`, so a second run never overwrites the first. That time is the config's id: everything built from it is named after it. You don't need to type the name later: `plan`, `verify` and `build` use the newest config in `output/` and print which one (`Using output/20261113-0936.gen.json`). To use another, put its name after the command (`plan 20261113-0936.gen.json` finds it in `output/`).
+
+Every file a run writes goes in `output/`, so the project folder stays clean. Commit the configs (`output/*.gen.json`): a config and its seed are what make a run repeatable. Git ignores the rest of `output/` (stores, pilot files, reports), because they are large and any of them can be rebuilt from its config. A bare name after `--out` or `--report` lands in `output/` too; a path with a folder in it (`--out ./here.csv`) is used as given.
 
 ### plan
 
@@ -62,7 +60,7 @@ npx tsx src/cli.ts plan
 
 ### verify
 
-`verify` uses OpenFGA to check a sample of the store.
+`verify` uses OpenFGA to check a sample of the store. The pilot files it loads are kept in `output/20261113-0936.pilot/`, named after the config.
 
 ```bash
 npx tsx src/cli.ts verify
@@ -73,10 +71,10 @@ npx tsx src/cli.ts verify
 `build` creates the full store.
 
 ```bash
-npx tsx src/cli.ts build --out tuples.csv
+npx tsx src/cli.ts build
 ```
 
-`build` also writes `.jsonl` and a `.yaml` store file, and takes `--tenants 0,3,9` to write only those tenants, or `--scale 0.01` to shrink every count to 1%. 
+The store is named after the config, not the clock: `output/20261113-0936.gen.json` always builds `output/20261113-0936.tuples.csv`, whenever you run it, and a rebuild replaces the same file. Pick the format with `--format jsonl` or `--format yaml`, or name the file with `--out`. `--tenants 0,3,9` writes only those tenants, and `--scale 0.01` shrinks every count to 1%. A build with either gets its own name (`20261113-0936.scale-0.01.tuples.csv`, `20261113-0936.tenants-0-3-9.tuples.csv`), so it can't overwrite the full store.
 
 ## The config
 
@@ -276,7 +274,7 @@ Verifying is the slow part, not generating: 27,069 tuples take 6 seconds to chec
 
 ## Load the tuples into FGA
 
-Everything above ran against the CLI's in-memory OpenFGA. This is how to put the tuples into a server you run or one that is hosted for you. It works with any OpenFGA server. You need the same model file the config points to, and the `tuples.csv` from `build`.
+Everything above ran against the CLI's in-memory OpenFGA. This is how to put the tuples into a server you run or one that is hosted for you. It works with any OpenFGA server. You need the same model file the config points to, and the `tuples.csv` from `build` (`output/<config id>.tuples.csv`, called `tuples.csv` below).
 
 **1. Point the CLI at your server.**
 
