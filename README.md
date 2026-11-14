@@ -11,16 +11,21 @@ You give it a model and a config (how many of each type, and a few shape numbers
 
 ## Use it
 
-### init
-
-Start with the `init` command. It asks a few questions and builds your config file. This runs on an included sample model:
+All the steps, run in order on an included sample model:
 
 ```bash
 npm install
-npx tsx src/cli.ts init bench/models/simple.fga
+npx tsx src/cli.ts init bench/models/simple.fga   # answer a few questions; writes your config
+npx tsx src/cli.ts plan                           # shows tenants and tuple counts; writes nothing
+npx tsx src/cli.ts verify                         # has OpenFGA check a sample of the store
+npx tsx src/cli.ts build --out tuples.csv         # writes the full store
 ```
 
-Press Enter to take the default in brackets.
+The last three read the config that `init` wrote. Each step is explained below.
+
+### init
+
+`init` asks a few questions and builds your config file. Press Enter to take the default in brackets.
 
 [simple.fga](bench/models/simple.fga) is a small team document app. Users belong to organizations, every document is in one organization and has an owner, and a document can be viewed by its owner, by people it is shared with, or by every member of its organization:
 
@@ -49,23 +54,23 @@ To skip the questions, add `--skip`: `init <model> --skip` writes the same file 
 
 ### plan
 
-Once you have a config file, the other commands read it.
-
 `plan` plans the tenants and projected tuples, but writes nothing.
+
 ```bash
 npx tsx src/cli.ts plan
 ```
 
 ### verify
 
-`verify` uses OpenFGA to check a sample of the store
+`verify` uses OpenFGA to check a sample of the store.
+
 ```bash
 npx tsx src/cli.ts verify
 ```
 
 ### build
 
-`build` creates the full store
+`build` creates the full store.
 
 ```bash
 npx tsx src/cli.ts build --out tuples.csv
