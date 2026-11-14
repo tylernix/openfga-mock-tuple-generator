@@ -26,7 +26,7 @@ const here = (path: string) => fileURLToPath(new URL(path, import.meta.url))
 /** The configs the scale runs use. They are real files, so anyone can run them: `build bench/gdrive.gen.json --scale 10`. */
 const JOBS = {
   gdrive: here('./gdrive.gen.json'),
-  docs: here('./docs.gen.json'),
+  simple: here('./simple.gen.json'),
   gated: here('./gated.gen.json'),
 } as const
 type JobName = keyof typeof JOBS
@@ -127,11 +127,11 @@ function scale(quick: boolean) {
     { label: 'gdrive, 0.1x', job: { name: 'gdrive', factor: 0.1 } },
     { label: 'gdrive, 1x', job: { name: 'gdrive', factor: 1 } },
     ...(quick ? [] : [{ label: 'gdrive, 10x', job: { name: 'gdrive', factor: 10 } as Job }]),
-    { label: 'docs, 1x', job: { name: 'docs', factor: 1 } },
-    { label: 'docs, 10x', job: { name: 'docs', factor: 10 } },
+    { label: 'simple, 1x', job: { name: 'simple', factor: 1 } },
+    { label: 'simple, 10x', job: { name: 'simple', factor: 10 } },
     ...(quick ? [] : [
-      { label: 'docs, 100x', job: { name: 'docs', factor: 100 } as Job },
-      { label: 'docs, 300x', job: { name: 'docs', factor: 300 } as Job },
+      { label: 'simple, 100x', job: { name: 'simple', factor: 100 } as Job },
+      { label: 'simple, 300x', job: { name: 'simple', factor: 300 } as Job },
     ]),
     { label: 'gated, 1x', job: { name: 'gated', factor: 1 } },
   ]
@@ -276,9 +276,9 @@ function auditFile() {
   console.log('\nThis re-reads the CSV and derives everything from the tuples and the model JSON. It uses none of the generator\'s own reports.\n')
 }
 
-/** The docs config: re-reads its CSV with code that shares nothing with the generator and checks what the model promises. */
-function auditDocs() {
-  const { c, r } = loadJob('docs', 1)
+/** The simple config: re-reads its CSV with code that shares nothing with the generator and checks what the model promises. */
+function auditSimple() {
+  const { c, r } = loadJob('simple', 1)
   const dir = mkdtempSync(join(tmpdir(), 'fga-tuple-gen-bench-'))
   const path = join(dir, 'store.csv')
   const sink = fileSink(path, 'csv')
@@ -320,7 +320,7 @@ function auditDocs() {
   const sizes = [...docsPerOrg.values()].sort((a, b) => b - a)
   rmSync(dir, { recursive: true, force: true })
 
-  const out = [['check, on the docs file written at 1x', 'result', 'detail']]
+  const out = [['check, on the simple file written at 1x', 'result', 'detail']]
   out.push(['every tuple is a type restriction the model allows', verdict(invalid === 0), `${num(rows.length)} tuples read, ${invalid} not allowed`])
   out.push(['every document has exactly one owner', verdict(notOneOwner === 0), `${num(docs)} documents, ${num(notOneOwner)} without exactly one`])
   out.push(['every document is in exactly one organization', verdict(orgOfDoc.size === docs && docsPerOrg.size <= r.counts.organization), `${num(orgOfDoc.size)} of ${num(docs)} documents have one`])
@@ -328,9 +328,9 @@ function auditDocs() {
   out.push(['every direct viewer is a member of the document\'s organization', verdict(outside(viewerOrgChecks) === 0 && viewerOrgChecks.length > 0), `${num(outside(viewerOrgChecks))} of ${num(viewerOrgChecks.length)} viewers are not`])
   out.push(['about 30% of documents are shared with direct viewers, as asked', verdict(Math.abs(shared - 0.3) < 0.01), `${(shared * 100).toFixed(1)}% of documents`])
   out.push(['organizations differ in size (skew 1)', verdict(sizes.length > 1 && sizes[0] > 10 * sizes[sizes.length - 1]), `largest ${num(sizes[0])} documents, smallest ${num(sizes[sizes.length - 1])}`])
-  console.log('## Independent check of the docs output file\n')
+  console.log('## Independent check of the simple output file\n')
   console.log(md(out))
-  console.log('\nThe docs config is the one in the README. This re-reads its CSV and checks, from the tuples alone, what the model and the config promise.\n')
+  console.log('\nThe simple config is the one in the README. This re-reads its CSV and checks, from the tuples alone, what the model and the config promise.\n')
 }
 
 function referee() {
@@ -345,10 +345,10 @@ function referee() {
   const rows = [['model', 'pilot tuples', 'tenants', 'ListUsers', 'Check', 'not asserted', 'seconds', 'result']]
   const row = (label: string, v: ReturnType<typeof verify>, started: number) => rows.push([label, num(v.tuples), String(v.tenants.length), `${v.listUsers.passing + v.incomplete}/${v.listUsers.total}`, `${v.checks.passing}/${v.checks.total}`, String(v.skipped), ((Date.now() - started) / 1000).toFixed(1), verdict(v.ok)])
   {
-    // The README's docs config, as the benchmark file has it.
-    const { c, r } = loadJob('docs', 1)
+    // The README's simple config, as the benchmark file has it.
+    const { c, r } = loadJob('simple', 1)
     const started = Date.now()
-    row('docs (the README example)', verify(c, r, { dir: join(work, 'docs'), maxTuples: 20_000, perType: 10 }), started)
+    row('simple (the README example)', verify(c, r, { dir: join(work, 'simple'), maxTuples: 20_000, perType: 10 }), started)
   }
   for (const [i, cs] of cases.entries()) {
     const c = model(cs.name)
@@ -368,7 +368,7 @@ else {
   environment()
   determinism()
   auditFile()
-  auditDocs()
+  auditSimple()
   referee()
   scale(quick)
   if (failed) {

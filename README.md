@@ -17,12 +17,12 @@ Start with the interactive `init` command. It asks a few questions and builds yo
 
 ```bash
 npm install
-npx tsx src/cli.ts init bench/models/docs.fga --interactive
+npx tsx src/cli.ts init bench/models/simple.fga --interactive
 ```
 
 Press Enter to take the default in brackets.
 
-[docs.fga](bench/models/docs.fga) is a small team document app. Users belong to organizations, every document is in one organization and has an owner, and a document can be viewed by its owner, by people it is shared with, and by every member of its organization:
+[simple.fga](bench/models/simple.fga) is a small team document app. Users belong to organizations, every document is in one organization and has an owner, and a document can be viewed by its owner, by people it is shared with, and by every member of its organization:
 
 ```
 model
@@ -42,7 +42,7 @@ type document
     define viewer: [user] or owner or member from org
 ```
 
-For your own model, put its path in place of `bench/models/docs.fga` (a `.fga` or `.json` file). The questions are always the same three kinds: which type is a tenant, how many objects of each type, and, if the model nests a type inside itself, how deep.
+For your own model, put its path in place of `bench/models/simple.fga` (a `.fga` or `.json` file). The questions are always the same three kinds: which type is a tenant, how many objects of each type, and, if the model nests a type inside itself, how deep.
 
 Once you have a config file, the other commands read it:
 
@@ -60,11 +60,11 @@ npx tsx src/cli.ts build gen.json --out tuples.csv   # the full store
 
 ### The smallest config
 
-Two fields: the model file, and how many objects of each type you want. This is [bench/docs.smallest.gen.json](bench/docs.smallest.gen.json), for the docs model above. The model path is relative to the config file.
+Two fields: the model file, and how many objects of each type you want. This is [bench/simple.smallest.gen.json](bench/simple.smallest.gen.json), for the simple model above. The model path is relative to the config file.
 
 ```json
 {
-  "model": "models/docs.fga",
+  "model": "models/simple.fga",
   "counts": { "user": 5000, "organization": 50, "document": 100000 }
 }
 ```
@@ -72,8 +72,8 @@ Two fields: the model file, and how many objects of each type you want. This is 
 Try it from the repo root:
 
 ```bash
-npx tsx src/cli.ts plan   bench/docs.smallest.gen.json    # about 399,000 tuples
-npx tsx src/cli.ts verify bench/docs.smallest.gen.json    # OpenFGA agrees: 48/48 ListUsers, 57/57 Checks
+npx tsx src/cli.ts plan   bench/simple.smallest.gen.json    # about 399,000 tuples
+npx tsx src/cli.ts verify bench/simple.smallest.gen.json    # OpenFGA agrees: 48/48 ListUsers, 57/57 Checks
 ```
 
 Everything you leave out gets a default: seed 1, numeric ids, the tenant type the tool picks from the model (here the organization), and a default shape for every relation. Each default is listed as a warning, so you can see what you have not decided:
@@ -90,11 +90,11 @@ The defaults are plain: every user belongs to one organization, every document i
 
 ### One step up: set two relations
 
-To choose the shape of a relation, add it under `edges`. This is [bench/docs.gen.json](bench/docs.gen.json), the config the docs benchmarks run: every document has exactly one owner, and 30% of documents are also shared directly with a few people (typically 3, at most 50).
+To choose the shape of a relation, add it under `edges`. This is [bench/simple.gen.json](bench/simple.gen.json), the config the simple benchmarks run: every document has exactly one owner, and 30% of documents are also shared directly with a few people (typically 3, at most 50).
 
 ```json
 {
-  "model": "models/docs.fga",
+  "model": "models/simple.fga",
   "counts": { "user": 5000, "organization": 50, "document": 100000 },
   "edges": {
     "document#owner:user": { "coverage": 1, "count": 1 },
@@ -105,7 +105,7 @@ To choose the shape of a relation, add it under `edges`. This is [bench/docs.gen
 
 `coverage` is the share of documents that get any, and `count` is how many each gets: a number, or a spread (`typical`, `p90`, `max`). The other two relations stay at their defaults and still show as warnings. Run `init <model>` without `--interactive` to get every relation written out, each with its default and the question it answers.
 
-The benchmarks check this config's output file: every document has exactly one owner, owners and direct viewers are members of the document's organization, 29.9% of documents are shared, and the largest organization has 22,226 documents against 444 for the smallest (see [Benchmarks](#independent-check-of-the-docs-output-file)).
+The benchmarks check this config's output file: every document has exactly one owner, owners and direct viewers are members of the document's organization, 29.9% of documents are shared, and the largest organization has 22,226 documents against 444 for the smallest (see [Benchmarks](#independent-check-of-the-simple-output-file)).
 
 ### All the fields
 | Field | Meaning |
@@ -133,7 +133,7 @@ The defaults are guesses. They are written into the config so you see them and c
 
 ### The config the benchmark used
 
-The gdrive scale benchmarks run [bench/gdrive.gen.json](bench/gdrive.gen.json); the docs ones run the [one-step-up config](#one-step-up-set-two-relations) above. It is what `init` wrote for [gdrive.fga](bench/models/gdrive.fga), with only the counts raised to 200,000 users, 500 organizations, 20,000 groups, 150,000 folders and 2,000,000 documents. Every other value is the default `init` wrote. The gated row uses [bench/gated.gen.json](bench/gated.gen.json) the same way. The benchmark reads these files, so what is shown here is what ran.
+The gdrive scale benchmarks run [bench/gdrive.gen.json](bench/gdrive.gen.json); the simple ones run the [one-step-up config](#one-step-up-set-two-relations) above. It is what `init` wrote for [gdrive.fga](bench/models/gdrive.fga), with only the counts raised to 200,000 users, 500 organizations, 20,000 groups, 150,000 folders and 2,000,000 documents. Every other value is the default `init` wrote. The gated row uses [bench/gated.gen.json](bench/gated.gen.json) the same way. The benchmark reads these files, so what is shown here is what ran.
 
 The 0.01x, 0.1x and 10x rows are the same file with `--scale`, which multiplies every count, and so the number of organizations, which are the tenants:
 
@@ -340,23 +340,23 @@ Measured on an Apple M3 Pro (11 cores, 18 GB), Node 24.14, OpenFGA CLI 0.8.1, 20
 
 ### Scale and speed
 
-Two models run at several sizes. [docs.fga](bench/models/docs.fga) is the example above, with [docs.gen.json](bench/docs.gen.json). [gdrive.fga](bench/models/gdrive.fga) is bigger: organizations that contain groups, nested folders and documents, with users, group members, owners and a `but not` exclusion, with [gdrive.gen.json](bench/gdrive.gen.json) (shown [below](#the-config-the-benchmark-used)). Every row uses the config's own numbers, scaled with `--scale`.
+Two models run at several sizes. [simple.fga](bench/models/simple.fga) is the example above, with [simple.gen.json](bench/simple.gen.json). [gdrive.fga](bench/models/gdrive.fga) is bigger: organizations that contain groups, nested folders and documents, with users, group members, owners and a `but not` exclusion, with [gdrive.gen.json](bench/gdrive.gen.json) (shown [below](#the-config-the-benchmark-used)). Every row uses the config's own numbers, scaled with `--scale`.
 
 Every row writes the whole CSV to disk, then re-reads the file line by line, counts the rows and checks that each is a type restriction the model allows. The file is deleted afterwards. Seconds include writing the file.
 
 | model, size | objects | tenants | tuples | seconds | tuples / second | peak memory (MB) | CSV size (MB) | rows re-read from the file | rows the model does not allow | rule violations | depth reached / asked |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| docs, 1x | 105,050 | 50 | 345,204 | 0.3 | 1,369,857 | 144 | 12 | 345,204 | 0 | 0 | - |
-| docs, 10x | 1,050,500 | 500 | 3,440,717 | 2.3 | 1,518,410 | 253 | 127 | 3,440,717 | 0 | 0 | - |
-| docs, 100x | 10,505,000 | 5,000 | 34,413,756 | 21.6 | 1,594,706 | 307 | 1,335 | 34,413,756 | 0 | 0 | - |
-| **docs, 300x** | **31,515,000** | **15,000** | **103,189,935** | **66.0** | **1,562,939** | **337** | **4,122** | **103,189,935** | **0** | **0** | - |
+| simple, 1x | 105,050 | 50 | 345,204 | 0.3 | 1,369,857 | 144 | 12 | 345,204 | 0 | 0 | - |
+| simple, 10x | 1,050,500 | 500 | 3,440,717 | 2.3 | 1,518,410 | 253 | 127 | 3,440,717 | 0 | 0 | - |
+| simple, 100x | 10,505,000 | 5,000 | 34,413,756 | 21.6 | 1,594,706 | 307 | 1,335 | 34,413,756 | 0 | 0 | - |
+| **simple, 300x** | **31,515,000** | **15,000** | **103,189,935** | **66.0** | **1,562,939** | **337** | **4,122** | **103,189,935** | **0** | **0** | - |
 | gdrive, 0.01x | 23,705 | 5 | 105,465 | 0.1 | 901,410 | 96 | 4 | 105,465 | 0 | 0 | 3/3, 3/3 |
 | gdrive, 0.1x | 237,050 | 50 | 1,057,488 | 1.0 | 1,043,917 | 226 | 38 | 1,057,488 | 0 | 0 | 3/3, 3/3 |
 | gdrive, 1x | 2,370,500 | 500 | 10,579,235 | 9.9 | 1,068,394 | 288 | 406 | 10,579,235 | 0 | 0 | 3/3, 3/3 |
 | **gdrive, 10x** | **23,705,000** | **5,000** | **105,829,695** | **103.6** | **1,021,986** | **338** | **4,272** | **105,829,695** | **0** | **0** | **3/3, 3/3** |
 | gated, 1x | 210,200 | 200 | 335,668 | 2.7 | 123,136 | 248 | 10 | 335,668 | 0 | 0 | - |
 
-- **Over a million tuples per second, flat from 345,000 to 106 million tuples.** The docs model runs at about 1.4 to 1.6 million per second, and gdrive at about 1 million. Memory does not grow with size (96 MB at 100,000 tuples, 338 MB at 106 million) because tenants are generated one at a time.
+- **Over a million tuples per second, flat from 345,000 to 106 million tuples.** The simple model runs at about 1.4 to 1.6 million per second, and gdrive at about 1 million. Memory does not grow with size (96 MB at 100,000 tuples, 338 MB at 106 million) because tenants are generated one at a time.
 - **The two largest stores are real files of 4.1 GB and 4.3 GB.** Every row of both (103,189,935 and 105,829,695) was written, re-read, and is allowed by the model. A CSV is about 40 bytes per tuple.
 - **The gated model ran about 8 to 9x slower per tuple** (123,000 tuples per second). It picks subjects who pass `[user] and member from org`, which means evaluating the rule per object. I expect that is the cost but did not profile it; the model also writes far fewer tuples per object.
 - **The large stores were written to disk and re-read, not loaded into OpenFGA.** Only pilots are loaded (below).
@@ -385,9 +385,9 @@ This re-reads the 1,057,488-tuple CSV and derives everything from the tuples and
 | every user and group sits in the organization of the object it is written on | PASS | 0 of 827,013 tuples cross organizations |
 | every user is in one organization | PASS | 0 users in two or more |
 
-### Independent check of the docs output file
+### Independent check of the simple output file
 
-The docs config in [docs.gen.json](bench/docs.gen.json), built at 1x (345,204 tuples), re-read the same way. These check what the model and the config promise, from the tuples alone.
+The simple config in [simple.gen.json](bench/simple.gen.json), built at 1x (345,204 tuples), re-read the same way. These check what the model and the config promise, from the tuples alone.
 
 | check | result | detail |
 | --- | --- | --- |
@@ -405,7 +405,7 @@ A pilot is whole tenants, exactly as they are in the full store. It is loaded in
 
 | model | pilot tuples | tenants | ListUsers | Check | not asserted | seconds | result |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| docs (the example above) | 13,728 | 3 | 33/33 | 43/43 | 0 | 1.9 | PASS |
+| simple (the example above) | 13,728 | 3 | 33/33 | 43/43 | 0 | 1.9 | PASS |
 | drive (wildcards, conditions, nesting) | 4,016 | 3 | 121/121 | 169/169 | 15 | 0.3 | PASS |
 | gated (intersections, exclusions) | 543 | 3 | 86/86 | 113/113 | 0 | 0.1 | PASS |
 | rbac (roles with no org link) | 1,868 | 3 | 63/63 | 97/97 | 0 | 0.1 | PASS |

@@ -115,14 +115,14 @@ describe('the configs the README shows', () => {
     return { r, report, tuples: sink.tuples }
   }
 
-  it('shows each config and the docs model exactly as the files have them', () => {
-    expect(readme).toContain(load('docs.smallest.gen.json').text)
-    expect(readme).toContain(load('docs.gen.json').text)
-    expect(readme).toContain(read('../bench/models/docs.fga').trim())
+  it('shows each config and the simple model exactly as the files have them', () => {
+    expect(readme).toContain(load('simple.smallest.gen.json').text)
+    expect(readme).toContain(load('simple.gen.json').text)
+    expect(readme).toContain(read('../bench/models/simple.fga').trim())
   })
 
   it('the smallest config builds with a warning for each relation it leaves at the default', () => {
-    const { r, report, tuples } = built('docs.smallest.gen.json')
+    const { r, report, tuples } = built('simple.smallest.gen.json')
     expect(r.warnings).toEqual([
       'No settings for organization#member:user; used the default (assignment).',
       'No settings for document#org:organization; used the default (container).',
@@ -139,8 +139,8 @@ describe('the configs the README shows', () => {
     expect([...orgs.values()].every((n) => n === 1)).toBe(true)
   })
 
-  it('docs.gen.json gives every document one owner from its own organization, and shares 30% of them', () => {
-    const { report, tuples } = built('docs.gen.json')
+  it('simple.gen.json gives every document one owner from its own organization, and shares 30% of them', () => {
+    const { report, tuples } = built('simple.gen.json')
     expect(report.violationCount).toBe(0)
     const memberOf = new Map<string, string>()
     const orgOfDoc = new Map<string, string>()

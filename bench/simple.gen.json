@@ -1,5 +1,5 @@
 {
-  "model": "models/docs.fga",
+  "model": "models/simple.fga",
   "counts": { "user": 5000, "organization": 50, "document": 100000 },
   "edges": {
     "document#owner:user": { "coverage": 1, "count": 1 },
