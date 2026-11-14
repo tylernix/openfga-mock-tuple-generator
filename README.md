@@ -16,7 +16,69 @@ npx tsx src/cli.ts verify gen.json                   # OpenFGA checks a pilot of
 npx tsx src/cli.ts build gen.json --out tuples.csv   # the full store
 ```
 
-`init --interactive` asks for the tenant type, the counts and the nesting depths. `build` also writes `.jsonl` and a `.yaml` store file, and takes `--tenants 0,3,9` to write only those tenants.
+`init --interactive` asks for the tenant type, the counts and the nesting depths. `build` also writes `.jsonl` and a `.yaml` store file, and takes `--tenants 0,3,9` to write only those tenants, or `--scale 0.01` to shrink every count to 1%.
+
+## Load the tuples into FGA
+
+Works with a self-hosted [OpenFGA](https://openfga.dev) server and with Auth0 FGA. You need the same model file the config points to, and the `tuples.csv` from `build`.
+
+**1. Point the CLI at your server.**
+
+```bash
+export FGA_API_URL=http://localhost:8080   # your OpenFGA or Auth0 FGA API URL
+```
+
+For a local OpenFGA server, `docker run -p 8080:8080 -p 8081:8081 -p 3000:3000 openfga/openfga run` starts one with the default configuration. For millions of tuples, give it [Postgres or MySQL](https://openfga.dev/docs/getting-started/setup-openfga/docker).
+
+For Auth0 FGA, create a store and a client in the [dashboard](https://dashboard.fga.dev), then pass the client's credentials to every command below with `--client-id`, `--client-secret`, `--api-token-issuer` and `--api-audience`, and use `--store-id` in place of `FGA_STORE_ID`. The CLI also reads a config file (`--config`, default `~/.fga.yaml`).
+
+**2. Create a store with the model.**
+
+```bash
+export FGA_STORE_ID=$(fga store create --name "mock tuples" --model model.fga | jq -r .store.id)
+```
+
+On Auth0 FGA, you made the store in the dashboard, so write the model into it instead: `fga model write --store-id <id> --file model.fga`. The same command works for an existing OpenFGA store.
+
+Write the model before the tuples: the server checks every tuple against it when it is written.
+
+**3. Write the tuples.**
+
+```bash
+fga tuple write --file tuples.csv --max-tuples-per-write 100 --max-parallel-requests 10 --hide-imported-tuples
+```
+
+The CSV columns are the ones `fga tuple write` expects, so no conversion is needed. The default is 1 tuple per request, which is very slow for a large file, so always set `--max-tuples-per-write`.
+
+| Target | `--max-tuples-per-write` | `--max-rps` |
+|---|---|---|
+| OpenFGA server | up to 100 (the API accepts 100 per request) | not needed |
+| Auth0 FGA | 40 (the plan limit) | at or below your plan's write rate |
+
+If a load stops partway, run the same command again. For a file, the CLI ignores tuples that already exist (`--on-duplicate ignore`), so it carries on where it stopped. OpenFGA servers need v1.10.0 or later for this.
+
+**4. Spot-check it.** Pick any row from `tuples.csv` and ask the server:
+
+```bash
+fga query check user:<id> <relation> <object_type>:<object_id>
+```
+
+### Fit the store to the plan
+
+| Auth0 FGA plan | Tuples in the store | Writes per second | Tuples per write |
+|---|---|---|---|
+| Free trial | 50 thousand | 20 | 40 |
+| Enterprise | 10 million (more available to purchase) | 150 | 40 |
+
+These are from the [Auth0 FGA plans page](https://docs.fga.dev/subscription-plans). The fastest a load can run is tuples per write times writes per second, which is 6,000 tuples per second on Enterprise. So 1 million tuples take about 3 minutes, and the 10.6 million tuple gdrive store in the benchmarks below would take about 30. That is derived from the limits, not measured, and that store is over the Enterprise limit of 10 million anyway.
+
+Use `plan gen.json --scale 0.01` to see the tuple count first. Then shrink with `build --scale`, or write a few whole tenants with `build --tenants 0,3,9`. A tenant built alone is identical to its slice of the full store.
+
+### What has been tested
+
+The tool's CSV was read correctly by the CLI's CSV reader, including public grants (`user:*`) and conditions. I loaded a 15,365-tuple store with both as a store file's `tuple_file` in `fga model test`, and Checks on a public grant and on a condition (allowed at `hour` 10, denied at 20) came back right.
+
+I have not run `fga tuple write` against a live server, so the flags above come from the CLI's help and the OpenFGA and Auth0 FGA docs. I also have not measured load speed, so treat the times above as the best case.
 
 ## The config
 
