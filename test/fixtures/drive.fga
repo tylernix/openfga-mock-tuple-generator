@@ -1,0 +1,35 @@
+model
+  schema 1.1
+
+type user
+
+type organization
+  relations
+    define member: [user]
+    define admin: [user]
+
+type group
+  relations
+    define org: [organization]
+    define member: [user, group#member]
+    define manager: [user] or admin from org
+
+type folder
+  relations
+    define org: [organization]
+    define parent: [folder]
+    define viewer: [user, group#member] or viewer from parent or admin from org
+
+type document
+  relations
+    define folder: [folder]
+    define owner: [user]
+    define viewer: [user, user:*, group#member, user with in_office_hours] or owner or viewer from folder
+    define guest: [user with in_office_hours]
+    define public: [user:*]
+    define blocked: [user]
+    define can_view: (viewer or guest or public) but not blocked
+
+condition in_office_hours(hour: int) {
+  hour >= 9 && hour <= 17
+}

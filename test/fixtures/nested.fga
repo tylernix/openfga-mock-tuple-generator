@@ -1,0 +1,29 @@
+model
+  schema 1.1
+
+type user
+
+type group
+  relations
+    define member: [user, group#member]
+
+type drive
+  relations
+    define owner: [user]
+
+type template
+  relations
+    define author: [user]
+
+type folder
+  relations
+    define drive: [drive]
+    define template: [template]
+    define parent: [folder]
+    define viewer: [user] or viewer from parent or owner from drive or author from template
+
+type document
+  relations
+    define group: [group]
+    define folder: [folder]
+    define viewer: [user] or member from group or viewer from folder

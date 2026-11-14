@@ -1,0 +1,23 @@
+model
+  schema 1.1
+
+type user
+
+type organization
+  relations
+    define member: [user]
+
+type group
+  relations
+    define member: [user, group#member]
+
+type role
+  relations
+    define assignee: [user, group#member]
+
+type resource
+  relations
+    define org: [organization]
+    define reader: [user, role#assignee]
+    define org_member: member from org
+    define can_read: reader and org_member

@@ -1,0 +1,23 @@
+model
+  schema 1.1
+
+type user
+
+type org
+  relations
+    define member: [user]
+    define admin: [user] and member
+
+type team
+  relations
+    define org: [org]
+    define member: [user] and member from org
+    define lead: [user] and member
+
+type project
+  relations
+    define team: [team]
+    define org: [org]
+    define screened: [user] and member from team
+    define contributor: member from team but not screened
+    define owner: admin from org
