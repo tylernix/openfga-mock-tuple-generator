@@ -11,7 +11,7 @@ You give it a model and a config (how many of each type, and a few shape numbers
 
 ## Use it
 
-Run `npm install`
+### init
 
 Start with the interactive `init` command. It asks a few questions and builds your config file. This runs on an included sample model:
 
@@ -20,9 +20,9 @@ npm install
 npx tsx src/cli.ts init bench/models/simple.fga --interactive
 ```
 
-Press Enter to take the default in brackets.
+Press Enter to take the default in brackets. The tenant question is a menu: move with the up and down arrows (or `j` and `k`), press Enter to choose. The tool preselects the type it thinks is the tenant, and `none` keeps one store that you split into a number of tenants. Ctrl-C quits without writing anything. If the input is piped instead of typed, the same question is asked as plain text.
 
-[simple.fga](bench/models/simple.fga) is a small team document app. Users belong to organizations, every document is in one organization and has an owner, and a document can be viewed by its owner, by people it is shared with, and by every member of its organization:
+[simple.fga](bench/models/simple.fga) is a small team document app. Users belong to organizations, every document is in one organization and has an owner, and a document can be viewed by its owner, by people it is shared with, or by every member of its organization:
 
 ```
 model
@@ -38,29 +38,46 @@ type document
   relations
     define org: [organization]
     define owner: [user]
-    # Owners, anyone the document is shared with, and every member of its organization.
     define viewer: [user] or owner or member from org
 ```
 
 For your own model, put its path in place of `bench/models/simple.fga` (a `.fga` or `.json` file). The questions are always the same three kinds: which type is a tenant, how many objects of each type, and, if the model nests a type inside itself, how deep.
 
-Once you have a config file, the other commands read it:
+To skip the questions, `init <model> --out my.gen.json` writes the same file with every default, and you edit it by hand (see [The config](#the-config)).
 
+`init` names the file by date and time, like `20261113-0936.gen.json`, so a second run never overwrites the first. You don't need to type that name later: `plan`, `verify` and `build` use the newest `*.gen.json` in the folder and print which one (`Using 20261113-0936.gen.json`). To use another, put its name after the command.
+
+### plan
+
+Once you have a config file, the other commands read it.
+
+`plan` plans the tenants and projected tuples, but writes nothing.
 ```bash
-npx tsx src/cli.ts plan gen.json                     # tenants and projected tuples; writes nothing
-npx tsx src/cli.ts verify gen.json                   # OpenFGA checks a pilot of the store
-npx tsx src/cli.ts build gen.json --out tuples.csv   # the full store
+npx tsx src/cli.ts plan
 ```
 
-`build` also writes `.jsonl` and a `.yaml` store file, and takes `--tenants 0,3,9` to write only those tenants, or `--scale 0.01` to shrink every count to 1%. To skip the questions, `init <model> --out gen.json` writes the same file with every default, and you edit it by hand (see [The config](#the-config)).
+### verify
+
+`verify` uses OpenFGA to check a sample of the store
+```bash
+npx tsx src/cli.ts verify
+```
+
+### build
+
+`build` creates the full store
+
+```bash
+npx tsx src/cli.ts build --out tuples.csv
+```
+
+`build` also writes `.jsonl` and a `.yaml` store file, and takes `--tenants 0,3,9` to write only those tenants, or `--scale 0.01` to shrink every count to 1%. 
 
 ## The config
 
-`gen.json` is the only input. Keep it in git with its seed: the same file always writes the same store.
+The config (a `*.gen.json` file) is the only input. Keep it in git with its seed: the same file always writes the same store.
 
-### The smallest config
-
-Two fields: the model file, and how many objects of each type you want. This is [bench/simple.smallest.gen.json](bench/simple.smallest.gen.json), for the simple model above. The model path is relative to the config file.
+This is the simplest config you can make. Two fields: the model file and how many object of each type you want.
 
 ```json
 {
@@ -69,21 +86,11 @@ Two fields: the model file, and how many objects of each type you want. This is 
 }
 ```
 
-Try it from the repo root:
+Try it:
 
 ```bash
 npx tsx src/cli.ts plan   bench/simple.smallest.gen.json    # about 399,000 tuples
 npx tsx src/cli.ts verify bench/simple.smallest.gen.json    # OpenFGA agrees: 48/48 ListUsers, 57/57 Checks
-```
-
-Everything you leave out gets a default: seed 1, numeric ids, the tenant type the tool picks from the model (here the organization), and a default shape for every relation. Each default is listed as a warning, so you can see what you have not decided:
-
-```
-Warnings:
-  - No settings for organization#member:user; used the default (assignment).
-  - No settings for document#org:organization; used the default (container).
-  - No settings for document#owner:user; used the default (assignment).
-  - No settings for document#viewer:user; used the default (assignment).
 ```
 
 The defaults are plain: every user belongs to one organization, every document is in one organization, and half of the documents have an owner and half have direct viewers, typically 2 each. That is why the next step exists. Every type in the model needs a count; if one is missing, the tool stops and names it (`counts.user is missing`).
@@ -131,151 +138,6 @@ Per edge:
 
 The defaults are guesses. They are written into the config so you see them and change them.
 
-### The config the benchmark used
-
-The gdrive scale benchmarks run [bench/gdrive.gen.json](bench/gdrive.gen.json); the simple ones run the [one-step-up config](#one-step-up-set-two-relations) above. It is what `init` wrote for [gdrive.fga](bench/models/gdrive.fga), with only the counts raised to 200,000 users, 500 organizations, 20,000 groups, 150,000 folders and 2,000,000 documents. Every other value is the default `init` wrote. The gated row uses [bench/gated.gen.json](bench/gated.gen.json) the same way. The benchmark reads these files, so what is shown here is what ran.
-
-The 0.01x, 0.1x and 10x rows are the same file with `--scale`, which multiplies every count, and so the number of organizations, which are the tenants:
-
-```bash
-npx tsx src/cli.ts plan  bench/gdrive.gen.json                              # about 10.6 million tuples
-npx tsx src/cli.ts build bench/gdrive.gen.json --scale 10 --out tuples.csv  # about 106 million, 4.3 GB
-```
-
-What it says, in plain words:
-
-- **Tenants:** 500 organizations, with `skew` 1, so they differ a lot in size. The plan projects the largest at about 1.56 million tuples and the median at about 6,200.
-- **Containers:** every group and folder sits in exactly one organization, and every document in exactly one folder (`count` 1, `coverage` 1).
-- **Nesting:** folders and groups nest up to 3 levels below a top-level one. 90% of folders and 30% of groups are nested at all.
-- **Access:** about half of the documents have owners and about half have direct viewers, each typically 2 (90th percentile 6). A group typically has 8 members (90th percentile 40). 30% of folders and 30% of documents are shared with 1 to 3 groups, and 10% of documents block 1 or 2 users.
-
-<details>
-<summary>The whole file, <code>bench/gdrive.gen.json</code></summary>
-
-`_help`, `question` and `kind` are notes that `init` writes for the reader. The tool ignores them. Here, short `count` objects are put on one line; the values are the file's.
-
-```json
-{
-  "_help": [
-    "counts: how many objects of each type exist in the whole store.",
-    "tenant: organization contains 3 type(s) and is named like a tenant. Every type is split per tenant unless listed in \"global\". skew 0 makes tenants equal; 1 makes the largest far bigger than the typical one.",
-    "edges: one entry per way a tuple can be written. coverage is the share of objects that get any (0 to 1).",
-    "count is how many each gets: a number, {\"min\",\"max\"}, {\"typical\",\"p90\",\"max\"} or {\"share\"} of the pool.",
-    "per: \"subject\" makes count mean objects per subject (\"groups per user\"). crossTenant is the share of picks from another tenant.",
-    "Nesting edges take depth (a hard limit on levels below the top) and optionally branching."
-  ],
-  "model": "models/gdrive.fga",
-  "seed": 1,
-  "ids": "index",
-  "tenant": {
-    "type": "organization",
-    "skew": 1
-  },
-  "global": [],
-  "counts": {
-    "user": 200000,
-    "organization": 500,
-    "group": 20000,
-    "folder": 150000,
-    "document": 2000000
-  },
-  "edges": {
-    "organization#admin:user": {
-      "question": "For a typical organization, how many users hold admin?",
-      "kind": "assignment",
-      "coverage": 0.5,
-      "count": { "typical": 2, "p90": 6, "max": 100 }
-    },
-    "organization#member:user": {
-      "question": "For a typical organization, how many users hold member?",
-      "kind": "assignment",
-      "coverage": 1,
-      "count": { "share": 1 }
-    },
-    "group#manager:user": {
-      "question": "For a typical group, how many users hold manager?",
-      "kind": "assignment",
-      "coverage": 0.5,
-      "count": { "typical": 2, "p90": 6, "max": 100 }
-    },
-    "group#member:user": {
-      "question": "For a typical group, how many users hold member?",
-      "kind": "assignment",
-      "coverage": 1,
-      "count": { "typical": 8, "p90": 40, "max": 2000 }
-    },
-    "group#member:group#member": {
-      "question": "How many levels of group sit inside a top-level group, and what share of them are nested at all?",
-      "kind": "nesting",
-      "coverage": 0.3,
-      "depth": 3
-    },
-    "group#org:organization": {
-      "question": "Which organization does each group belong to (org)? Usually one.",
-      "kind": "container",
-      "coverage": 1,
-      "count": 1
-    },
-    "folder#org:organization": {
-      "question": "Which organization does each folder belong to (org)? Usually one.",
-      "kind": "container",
-      "coverage": 1,
-      "count": 1
-    },
-    "folder#parent:folder": {
-      "question": "How many levels of folder sit inside a top-level folder, and what share of them are nested at all?",
-      "kind": "nesting",
-      "coverage": 0.9,
-      "depth": 3
-    },
-    "folder#viewer:user": {
-      "question": "For a typical folder, how many users hold viewer?",
-      "kind": "assignment",
-      "coverage": 0.5,
-      "count": { "typical": 2, "p90": 6, "max": 100 }
-    },
-    "folder#viewer:group#member": {
-      "question": "For a typical folder, how many group members hold viewer?",
-      "kind": "assignment",
-      "coverage": 0.3,
-      "count": { "min": 1, "max": 3 }
-    },
-    "document#blocked:user": {
-      "question": "What share of documents have users excluded through blocked, and how many each?",
-      "kind": "block",
-      "coverage": 0.1,
-      "count": { "min": 1, "max": 2 }
-    },
-    "document#folder:folder": {
-      "question": "Which folder does each document belong to (folder)? Usually one.",
-      "kind": "container",
-      "coverage": 1,
-      "count": 1
-    },
-    "document#owner:user": {
-      "question": "For a typical document, how many users hold owner?",
-      "kind": "assignment",
-      "coverage": 0.5,
-      "count": { "typical": 2, "p90": 6, "max": 100 }
-    },
-    "document#viewer:user": {
-      "question": "For a typical document, how many users hold viewer?",
-      "kind": "assignment",
-      "coverage": 0.5,
-      "count": { "typical": 2, "p90": 6, "max": 100 }
-    },
-    "document#viewer:group#member": {
-      "question": "For a typical document, how many group members hold viewer?",
-      "kind": "assignment",
-      "coverage": 0.3,
-      "count": { "min": 1, "max": 3 }
-    }
-  }
-}
-```
-
-</details>
-
 ## How it works
 
 The model defines which tuples are allowed. The tool reads the model, builds the store one tenant/org at a time, and verifies its own work using OpenFGA. Review the [Benchmarks](#benchmarks).
@@ -299,7 +161,7 @@ The model defines which tuples are allowed. The tool reads the model, builds the
 
 What none of this decides is whether the shape matches your customers. The counts and spreads in the config are yours, and the defaults are guesses.
 
-## What it guarantees
+## What it checks
 
 These are checked on every build, in a separate pass over what was written. If one fails, the build exits 1.
 
@@ -336,13 +198,13 @@ npx tsx bench/bench.ts          # about 5 minutes (5 min 13 s on the machine bel
 npx tsx bench/bench.ts --quick  # skips the 100-million-tuple runs and the 4 GB files
 ```
 
-Measured on an Apple M3 Pro (11 cores, 18 GB), Node 24.14, OpenFGA CLI 0.8.1, 2026-11-14. One run each; speed varies by a few percent between runs. Each scale row is a separate process, so its peak memory is its own. It is taken before the file is re-read.
-
 ### Scale and speed
 
 Two models run at several sizes. [simple.fga](bench/models/simple.fga) is the example above, with [simple.gen.json](bench/simple.gen.json). [gdrive.fga](bench/models/gdrive.fga) is bigger: organizations that contain groups, nested folders and documents, with users, group members, owners and a `but not` exclusion, with [gdrive.gen.json](bench/gdrive.gen.json) (shown [below](#the-config-the-benchmark-used)). Every row uses the config's own numbers, scaled with `--scale`.
 
 Every row writes the whole CSV to disk, then re-reads the file line by line, counts the rows and checks that each is a type restriction the model allows. The file is deleted afterwards. Seconds include writing the file.
+
+Measured on an Apple M3 Pro (11 cores, 18 GB), Node 24.14, OpenFGA CLI 0.8.1, 2026-11-14. One run each; speed varies by a few percent between runs. Each scale row is a separate process, so its peak memory is its own. It is taken before the file is re-read.
 
 | model, size | objects | tenants | tuples | seconds | tuples / second | peak memory (MB) | CSV size (MB) | rows re-read from the file | rows the model does not allow | rule violations | depth reached / asked |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -384,20 +246,6 @@ This re-reads the 1,057,488-tuple CSV and derives everything from the tuples and
 | every nested object is in the same organization as its parent | PASS | 0 of 14,033 parents outside |
 | every user and group sits in the organization of the object it is written on | PASS | 0 of 827,013 tuples cross organizations |
 | every user is in one organization | PASS | 0 users in two or more |
-
-### Independent check of the simple output file
-
-The simple config in [simple.gen.json](bench/simple.gen.json), built at 1x (345,204 tuples), re-read the same way. These check what the model and the config promise, from the tuples alone.
-
-| check | result | detail |
-| --- | --- | --- |
-| every tuple is a type restriction the model allows | PASS | 345,204 tuples read, 0 not allowed |
-| every document has exactly one owner | PASS | 100,000 documents, 0 without exactly one |
-| every document is in exactly one organization | PASS | 100,000 of 100,000 documents have one |
-| every owner is a member of the document's organization | PASS | 0 of 100,000 owners are not |
-| every direct viewer is a member of the document's organization | PASS | 0 of 140,204 viewers are not |
-| about 30% of documents are shared with direct viewers, as asked | PASS | 29.9% of documents |
-| organizations differ in size (skew 1) | PASS | largest 22,226 documents, smallest 444 |
 
 ### OpenFGA agrees
 
@@ -472,7 +320,7 @@ A hosted server limits three things: tuples in the store, tuples per write, and 
 
 The fastest a load can run is tuples per write times writes per second. As an example (not any particular provider's limits), a host that allows 40 tuples per write and 150 writes per second tops out at 6,000 tuples per second. So 1 million tuples take about 3 minutes, and the 10.6 million tuple gdrive store in the benchmarks above would take about 30. That is derived from the example limits, not measured.
 
-Use `plan gen.json --scale 0.01` to see the tuple count first. Then shrink with `build --scale`, or write a few whole tenants with `build --tenants 0,3,9`. A tenant built alone is identical to its slice of the full store.
+Use `plan --scale 0.01` to see the tuple count first. Then shrink with `build --scale`, or write a few whole tenants with `build --tenants 0,3,9`. A tenant built alone is identical to its slice of the full store.
 
 ### What has been tested
 

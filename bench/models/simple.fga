@@ -11,5 +11,4 @@ type document
   relations
     define org: [organization]
     define owner: [user]
-    # Owners, anyone the document is shared with, and every member of its organization.
     define viewer: [user] or owner or member from org

@@ -4,3 +4,7 @@ node_modules/
 .vitest-cache/
 *.log
 .DS_Store
+
+*.gen.json
+!bench/*.gen.json
+/gen.json
