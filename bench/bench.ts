@@ -13,9 +13,9 @@ import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { closeSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, statSync } from 'node:fs'
 import { cpus, platform, release, tmpdir, totalmem } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { defaultConfig, resolve, scaled } from '../src/config.js'
+import { resolve, scaled, type Config } from '../src/config.js'
 import { generate } from '../src/generate.js'
 import { compile, loadModel } from '../src/model.js'
 import { fileSink } from '../src/output.js'
@@ -23,12 +23,22 @@ import { verify } from '../src/verify.js'
 import { build, config, line, model, type Patch } from '../test/helpers.js'
 
 const here = (path: string) => fileURLToPath(new URL(path, import.meta.url))
+/** The configs the scale runs use. They are real files, so anyone can run them: `build bench/gdrive.gen.json --scale 10`. */
 const JOBS = {
-  gdrive: { model: here('./models/gdrive.fga'), base: { user: 200_000, organization: 500, group: 20_000, folder: 150_000, document: 2_000_000 } },
-  gated: { model: here('../test/fixtures/gated.fga'), base: { user: 100_000, org: 200, team: 10_000, project: 100_000 } },
+  gdrive: here('./gdrive.gen.json'),
+  gated: here('./gated.gen.json'),
 } as const
 type JobName = keyof typeof JOBS
 interface Job { name: JobName; factor: number }
+
+/** A bench config file, compiled against its model and scaled the way `--scale` does. */
+function loadJob(name: JobName, factor: number) {
+  const file = JOBS[name]
+  const cfg: Config = JSON.parse(readFileSync(file, 'utf8'))
+  const modelPath = resolvePath(dirname(file), cfg.model)
+  const c = compile(loadModel(modelPath))
+  return { c, r: resolve(c, scaled(cfg, factor)), modelPath }
+}
 
 const num = (n: number) => Math.round(n).toLocaleString('en-US')
 const md = (rows: string[][]) => [rows[0], rows[0].map(() => '---'), ...rows.slice(1)].map((r) => `| ${r.join(' | ')} |`).join('\n')
@@ -75,10 +85,7 @@ function rereadCsv(path: string, allowed: Set<string>): { rows: number; notAllow
 
 /** One generation run, in its own process: writes the whole CSV, then re-reads the file and deletes it. */
 function child(job: Job) {
-  const spec = JOBS[job.name]
-  const c = compile(loadModel(spec.model))
-  const cfg = scaled({ ...defaultConfig(c, spec.model), counts: { ...spec.base } }, job.factor)
-  const r = resolve(c, cfg)
+  const { c, r } = loadJob(job.name, job.factor)
   const dir = mkdtempSync(join(tmpdir(), 'fga-tuple-gen-bench-'))
   const file = join(dir, 'store.csv')
   const sink = fileSink(file, 'csv')
@@ -170,14 +177,12 @@ function determinism() {
 
 /** Re-reads the CSV with code that shares nothing with the generator and checks it against the model. */
 function auditFile() {
-  const modelPath = JOBS.gdrive.model
-  const c = compile(loadModel(modelPath))
+  const { c, r } = loadJob('gdrive', 0.1)
   const dir = mkdtempSync(join(tmpdir(), 'fga-tuple-gen-bench-'))
   const path = join(dir, 'store.csv')
   const sink = fileSink(path, 'csv')
   const asked = 3
-  const cfg = scaled({ ...defaultConfig(c, modelPath), counts: { ...JOBS.gdrive.base } }, 0.1)
-  generate(c, resolve(c, cfg), { sink })
+  generate(c, r, { sink })
   sink.close()
 
   const allowed = allowedKeys(c.model)

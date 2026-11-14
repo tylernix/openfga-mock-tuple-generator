@@ -1,0 +1,91 @@
+{
+  "_help": [
+    "counts: how many objects of each type exist in the whole store.",
+    "tenant: org contains 2 type(s) and is named like a tenant. Every type is split per tenant unless listed in \"global\". skew 0 makes tenants equal; 1 makes the largest far bigger than the typical one.",
+    "edges: one entry per way a tuple can be written. coverage is the share of objects that get any (0 to 1).",
+    "count is how many each gets: a number, {\"min\",\"max\"}, {\"typical\",\"p90\",\"max\"} or {\"share\"} of the pool.",
+    "per: \"subject\" makes count mean objects per subject (\"groups per user\"). crossTenant is the share of picks from another tenant.",
+    "Nesting edges take depth (a hard limit on levels below the top) and optionally branching."
+  ],
+  "model": "../test/fixtures/gated.fga",
+  "seed": 1,
+  "ids": "index",
+  "tenant": {
+    "type": "org",
+    "skew": 1
+  },
+  "global": [],
+  "counts": {
+    "user": 100000,
+    "org": 200,
+    "team": 10000,
+    "project": 100000
+  },
+  "edges": {
+    "org#admin:user": {
+      "question": "For a typical org, how many users hold admin? Only subjects who pass the rest of the rule are written.",
+      "kind": "assignment",
+      "coverage": 0.5,
+      "count": {
+        "typical": 2,
+        "p90": 6,
+        "max": 100
+      }
+    },
+    "org#member:user": {
+      "question": "For a typical org, how many users hold member?",
+      "kind": "assignment",
+      "coverage": 1,
+      "count": {
+        "share": 1
+      }
+    },
+    "team#lead:user": {
+      "question": "For a typical team, how many users hold lead? Only subjects who pass the rest of the rule are written.",
+      "kind": "assignment",
+      "coverage": 0.5,
+      "count": {
+        "typical": 2,
+        "p90": 6,
+        "max": 100
+      }
+    },
+    "team#member:user": {
+      "question": "For a typical team, how many users hold member? Only subjects who pass the rest of the rule are written.",
+      "kind": "assignment",
+      "coverage": 0.5,
+      "count": {
+        "typical": 2,
+        "p90": 6,
+        "max": 100
+      }
+    },
+    "team#org:org": {
+      "question": "Which org does each team belong to (org)? Usually one.",
+      "kind": "container",
+      "coverage": 1,
+      "count": 1
+    },
+    "project#org:org": {
+      "question": "Which org does each project belong to (org)? Usually one.",
+      "kind": "container",
+      "coverage": 1,
+      "count": 1
+    },
+    "project#screened:user": {
+      "question": "What share of projects have users excluded through screened, and how many each?",
+      "kind": "block",
+      "coverage": 0.1,
+      "count": {
+        "min": 1,
+        "max": 2
+      }
+    },
+    "project#team:team": {
+      "question": "Which team does each project belong to (team)? Usually one.",
+      "kind": "container",
+      "coverage": 1,
+      "count": 1
+    }
+  }
+}

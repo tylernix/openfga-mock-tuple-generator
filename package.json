@@ -4,7 +4,9 @@
   "private": true,
   "description": "Generates full-size mock tuple stores for any OpenFGA model, checked against OpenFGA.",
   "type": "module",
-  "bin": { "fga-tuple-gen": "src/cli.ts" },
+  "bin": {
+    "fga-tuple-gen": "src/cli.ts"
+  },
   "scripts": {
     "cli": "tsx src/cli.ts",
     "test": "vitest run",

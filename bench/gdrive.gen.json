@@ -1,0 +1,152 @@
+{
+  "_help": [
+    "counts: how many objects of each type exist in the whole store.",
+    "tenant: organization contains 3 type(s) and is named like a tenant. Every type is split per tenant unless listed in \"global\". skew 0 makes tenants equal; 1 makes the largest far bigger than the typical one.",
+    "edges: one entry per way a tuple can be written. coverage is the share of objects that get any (0 to 1).",
+    "count is how many each gets: a number, {\"min\",\"max\"}, {\"typical\",\"p90\",\"max\"} or {\"share\"} of the pool.",
+    "per: \"subject\" makes count mean objects per subject (\"groups per user\"). crossTenant is the share of picks from another tenant.",
+    "Nesting edges take depth (a hard limit on levels below the top) and optionally branching."
+  ],
+  "model": "models/gdrive.fga",
+  "seed": 1,
+  "ids": "index",
+  "tenant": {
+    "type": "organization",
+    "skew": 1
+  },
+  "global": [],
+  "counts": {
+    "user": 200000,
+    "organization": 500,
+    "group": 20000,
+    "folder": 150000,
+    "document": 2000000
+  },
+  "edges": {
+    "organization#admin:user": {
+      "question": "For a typical organization, how many users hold admin?",
+      "kind": "assignment",
+      "coverage": 0.5,
+      "count": {
+        "typical": 2,
+        "p90": 6,
+        "max": 100
+      }
+    },
+    "organization#member:user": {
+      "question": "For a typical organization, how many users hold member?",
+      "kind": "assignment",
+      "coverage": 1,
+      "count": {
+        "share": 1
+      }
+    },
+    "group#manager:user": {
+      "question": "For a typical group, how many users hold manager?",
+      "kind": "assignment",
+      "coverage": 0.5,
+      "count": {
+        "typical": 2,
+        "p90": 6,
+        "max": 100
+      }
+    },
+    "group#member:user": {
+      "question": "For a typical group, how many users hold member?",
+      "kind": "assignment",
+      "coverage": 1,
+      "count": {
+        "typical": 8,
+        "p90": 40,
+        "max": 2000
+      }
+    },
+    "group#member:group#member": {
+      "question": "How many levels of group sit inside a top-level group, and what share of them are nested at all?",
+      "kind": "nesting",
+      "coverage": 0.3,
+      "depth": 3
+    },
+    "group#org:organization": {
+      "question": "Which organization does each group belong to (org)? Usually one.",
+      "kind": "container",
+      "coverage": 1,
+      "count": 1
+    },
+    "folder#org:organization": {
+      "question": "Which organization does each folder belong to (org)? Usually one.",
+      "kind": "container",
+      "coverage": 1,
+      "count": 1
+    },
+    "folder#parent:folder": {
+      "question": "How many levels of folder sit inside a top-level folder, and what share of them are nested at all?",
+      "kind": "nesting",
+      "coverage": 0.9,
+      "depth": 3
+    },
+    "folder#viewer:user": {
+      "question": "For a typical folder, how many users hold viewer?",
+      "kind": "assignment",
+      "coverage": 0.5,
+      "count": {
+        "typical": 2,
+        "p90": 6,
+        "max": 100
+      }
+    },
+    "folder#viewer:group#member": {
+      "question": "For a typical folder, how many group members hold viewer?",
+      "kind": "assignment",
+      "coverage": 0.3,
+      "count": {
+        "min": 1,
+        "max": 3
+      }
+    },
+    "document#blocked:user": {
+      "question": "What share of documents have users excluded through blocked, and how many each?",
+      "kind": "block",
+      "coverage": 0.1,
+      "count": {
+        "min": 1,
+        "max": 2
+      }
+    },
+    "document#folder:folder": {
+      "question": "Which folder does each document belong to (folder)? Usually one.",
+      "kind": "container",
+      "coverage": 1,
+      "count": 1
+    },
+    "document#owner:user": {
+      "question": "For a typical document, how many users hold owner?",
+      "kind": "assignment",
+      "coverage": 0.5,
+      "count": {
+        "typical": 2,
+        "p90": 6,
+        "max": 100
+      }
+    },
+    "document#viewer:user": {
+      "question": "For a typical document, how many users hold viewer?",
+      "kind": "assignment",
+      "coverage": 0.5,
+      "count": {
+        "typical": 2,
+        "p90": 6,
+        "max": 100
+      }
+    },
+    "document#viewer:group#member": {
+      "question": "For a typical document, how many group members hold viewer?",
+      "kind": "assignment",
+      "coverage": 0.3,
+      "count": {
+        "min": 1,
+        "max": 3
+      }
+    }
+  }
+}
