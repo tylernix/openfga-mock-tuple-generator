@@ -96,7 +96,7 @@ describe('the README steps, with no config file named', () => {
     const dir = mkdtempSync(join(tmpdir(), 'tuplegen-'))
     dirs.push(dir)
 
-    const init = run(dir, ['init', simple, '--interactive'], 'organization\n500\n5\n1000\n')
+    const init = run(dir, ['init', simple], 'organization\n500\n5\n1000\n')
     expect(init.status, init.stderr).toBe(0)
     const files = readdirSync(dir).filter((f) => f.endsWith('.gen.json'))
     expect(files).toHaveLength(1)
@@ -112,11 +112,20 @@ describe('the README steps, with no config file named', () => {
     expect(readdirSync(dir)).toContain('tuples.csv')
   })
 
+  it('--skip asks nothing, even when it comes before the model', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tuplegen-'))
+    dirs.push(dir)
+    const init = run(dir, ['init', '--skip', simple, '--out', 'x.gen.json'])
+    expect(init.status, init.stderr).toBe(0)
+    expect(init.stdout).not.toContain('Which type is a tenant')
+    expect(readdirSync(dir)).toContain('x.gen.json')
+  })
+
   it('the file you name wins over the newest one', () => {
     const dir = mkdtempSync(join(tmpdir(), 'tuplegen-'))
     dirs.push(dir)
-    run(dir, ['init', simple, '--out', 'mine.gen.json'], '')
-    run(dir, ['init', simple, '--out', 'newer.gen.json'], '')
+    run(dir, ['init', simple, '--skip', '--out', 'mine.gen.json'])
+    run(dir, ['init', simple, '--skip', '--out', 'newer.gen.json'])
     utimesSync(join(dir, 'newer.gen.json'), new Date(), new Date(Date.now() + 60_000))
     const plan = run(dir, ['plan', 'mine.gen.json'])
     expect(plan.status, plan.stderr).toBe(0)
@@ -135,7 +144,7 @@ describe('the README steps, with no config file named', () => {
   it('a count that is not a number is an error when answers are piped', () => {
     const dir = mkdtempSync(join(tmpdir(), 'tuplegen-'))
     dirs.push(dir)
-    const init = run(dir, ['init', simple, '--interactive'], 'organization\nlots\n')
+    const init = run(dir, ['init', simple], 'organization\nlots\n')
     expect(init.status).not.toBe(0)
     expect(init.stderr).toContain('is not a whole number')
   })

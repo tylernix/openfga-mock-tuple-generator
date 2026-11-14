@@ -13,14 +13,14 @@ You give it a model and a config (how many of each type, and a few shape numbers
 
 ### init
 
-Start with the interactive `init` command. It asks a few questions and builds your config file. This runs on an included sample model:
+Start with the `init` command. It asks a few questions and builds your config file. This runs on an included sample model:
 
 ```bash
 npm install
-npx tsx src/cli.ts init bench/models/simple.fga --interactive
+npx tsx src/cli.ts init bench/models/simple.fga
 ```
 
-Press Enter to take the default in brackets. The tenant question is a menu: move with the up and down arrows (or `j` and `k`), press Enter to choose. The tool preselects the type it thinks is the tenant, and `none` keeps one store that you split into a number of tenants. Ctrl-C quits without writing anything. If the input is piped instead of typed, the same question is asked as plain text.
+Press Enter to take the default in brackets.
 
 [simple.fga](bench/models/simple.fga) is a small team document app. Users belong to organizations, every document is in one organization and has an owner, and a document can be viewed by its owner, by people it is shared with, or by every member of its organization:
 
@@ -43,7 +43,7 @@ type document
 
 For your own model, put its path in place of `bench/models/simple.fga` (a `.fga` or `.json` file). The questions are always the same three kinds: which type is a tenant, how many objects of each type, and, if the model nests a type inside itself, how deep.
 
-To skip the questions, `init <model> --out my.gen.json` writes the same file with every default, and you edit it by hand (see [The config](#the-config)).
+To skip the questions, add `--skip`: `init <model> --skip` writes the same file with every default, and you edit it by hand (see [The config](#the-config)).
 
 `init` names the file by date and time, like `20261113-0936.gen.json`, so a second run never overwrites the first. You don't need to type that name later: `plan`, `verify` and `build` use the newest `*.gen.json` in the folder and print which one (`Using 20261113-0936.gen.json`). To use another, put its name after the command.
 
@@ -110,7 +110,7 @@ To choose the shape of a relation, add it under `edges`. This is [bench/simple.g
 }
 ```
 
-`coverage` is the share of documents that get any, and `count` is how many each gets: a number, or a spread (`typical`, `p90`, `max`). The other two relations stay at their defaults and still show as warnings. Run `init <model>` without `--interactive` to get every relation written out, each with its default and the question it answers.
+`coverage` is the share of documents that get any, and `count` is how many each gets: a number, or a spread (`typical`, `p90`, `max`). The other two relations stay at their defaults and still show as warnings. Run `init <model> --skip` to get every relation written out, each with its default and the question it answers.
 
 The benchmarks check this config's output file: every document has exactly one owner, owners and direct viewers are members of the document's organization, 29.9% of documents are shared, and the largest organization has 22,226 documents against 444 for the smallest (see [Benchmarks](#independent-check-of-the-simple-output-file)).
 

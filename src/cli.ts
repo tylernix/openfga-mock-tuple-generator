@@ -15,8 +15,9 @@ import { verify } from './verify.js'
 
 const USAGE = `fga-tuple-gen: mock tuple stores for any OpenFGA model
 
-  init <model.fga|model.json> [--out <file>] [--interactive]
-      Writes a config with every type and edge, defaults filled in, and the question each edge answers.
+  init <model.fga|model.json> [--out <file>] [--skip] [--force]
+      Asks a few questions, then writes a config with every type and edge, defaults filled in, and the question each edge answers.
+      --skip asks nothing and writes every default.
       The file is named by date and time, like 20261113-0936.gen.json, unless you pass --out.
   plan [config.gen.json] [--scale 0.01]
       Tenants, projected tuples per edge and warnings. Writes nothing.
@@ -28,13 +29,16 @@ const USAGE = `fga-tuple-gen: mock tuple stores for any OpenFGA model
   plan, build and verify use the newest *.gen.json in this folder when you do not name a config.
 `
 
+// Flags that never take a value, so `init --skip model.fga` keeps model.fga as the model.
+const SWITCHES = new Set(['skip', 'force', 'help'])
+
 function parseArgs(argv: string[]) {
   const positional: string[] = []
   const flags = new Map<string, string>()
   for (let i = 0; i < argv.length; i++) {
     if (!argv[i].startsWith('--')) positional.push(argv[i])
     else if (argv[i].includes('=')) flags.set(argv[i].slice(2, argv[i].indexOf('=')), argv[i].slice(argv[i].indexOf('=') + 1))
-    else if (i + 1 < argv.length && !argv[i + 1].startsWith('--')) flags.set(argv[i].slice(2), argv[++i])
+    else if (!SWITCHES.has(argv[i].slice(2)) && i + 1 < argv.length && !argv[i + 1].startsWith('--')) flags.set(argv[i].slice(2), argv[++i])
     else flags.set(argv[i].slice(2), 'true')
   }
   return { positional, flags }
@@ -130,10 +134,11 @@ async function main() {
     if (existsSync(out) && !flags.has('force')) throw new Error(`${out} already exists; pass --force to overwrite it`)
     const compiled = compile(loadModel(modelPath))
     const cfg = defaultConfig(compiled, relative(dirname(resolvePath(out)), resolvePath(modelPath)) || basename(modelPath))
-    if (flags.has('interactive')) await interview(cfg, compiled)
+    const ask = !flags.has('skip')
+    if (ask) await interview(cfg, compiled)
     resolve(compiled, cfg)
     writeFileSync(out, JSON.stringify(cfg, null, 2) + '\n')
-    console.log(`${flags.has('interactive') ? '\n' : ''}Wrote ${out}: ${compiled.types.length} types, ${compiled.edges.length} edges.`)
+    console.log(`${ask ? '\n' : ''}Wrote ${out}: ${compiled.types.length} types, ${compiled.edges.length} edges.`)
     const named = flags.has('out')
     console.log(
       named
