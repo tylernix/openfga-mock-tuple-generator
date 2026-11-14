@@ -1,4 +1,4 @@
-# fga-tuple-gen
+# OpenFGA Mock Tuple Generator
 
 Builds a full-size mock tuple store for any OpenFGA model, and has OpenFGA check it.
 
