@@ -68,6 +68,13 @@ npx tsx src/cli.ts plan
 npx tsx src/cli.ts verify
 ```
 
+It works in four steps:
+
+1. **Picks pilot tenants.** Three whole tenants (a small, medium, and large) that fit in 20,000 tuples together. Each tenant is exactly as it is in the full store. Change the budget with `--max-tuples 50000`.
+2. **Works out the expected answers.** For a spread of objects (15 per type), the generator's own evaluator says who holds each relation.
+3. **Asks OpenFGA.** The pilot goes into OpenFGA's in-memory store with `fga model test`. For each sampled object, `ListUsers` must return exactly the expected users. `Check` must return true for a user who holds the relation and false for one who does not.
+4. **Reports reach.** For each relation, the median share of a tenant's users who hold it, and how many sampled objects are held by more than half of their tenant's users.
+
 ### build
 
 `build` creates the full store.
