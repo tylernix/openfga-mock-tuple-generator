@@ -181,7 +181,10 @@ describe('the README steps, with no config file named', () => {
     run(dir, ['init', simple, '--skip', '--out', '20200101-0000.gen.json'])
     const verify = run(dir, ['verify', '--max-tuples', '3000'])
     expect(verify.status, verify.stdout + verify.stderr).toBe(0)
-    expect(readdirSync(join(dir, 'output', '20200101-0000'))).toContain('20200101-0000.pilot.fga.yaml')
+    const files = readdirSync(join(dir, 'output', '20200101-0000'))
+    expect(files).toContain('20200101-0000.pilot.yaml')
+    // The OpenFGA editor extension takes over .fga.yaml and stops validating past 1,000 tuples.
+    expect(files.filter((f) => f.endsWith('.fga.yaml'))).toEqual([])
   })
 
   it('--skip asks nothing, even when it comes before the model', () => {

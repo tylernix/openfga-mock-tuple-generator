@@ -30,7 +30,7 @@ const USAGE = `fga-tuple-gen: mock tuple stores for any OpenFGA model
       Exits 1 if a rule is broken.
   verify [config.gen.json] [--max-tuples 20000] [--scale 0.01] [--out <file>]
       Loads a pilot (whole tenants of the full store) into OpenFGA's in-memory server and compares answers.
-      The test file it loads is kept as <config id>.pilot.fga.yaml in the config's folder.
+      The test file it loads is kept as <config id>.pilot.yaml in the config's folder.
 
   Everything built from a config goes in output/<config id>/. A bare name after --out or --report lands there;
   a path with a folder is used as given.
@@ -197,7 +197,7 @@ async function main() {
   if (command === 'verify') {
     const configPath = configArg(positional)
     const { compiled, resolved } = load(configPath, flags)
-    const file = flags.has('out') ? inDir(flags.get('out')!, runDir(configPath)) : join(runDir(configPath), `${planId(configPath)}.pilot.fga.yaml`)
+    const file = flags.has('out') ? inDir(flags.get('out')!, runDir(configPath)) : join(runDir(configPath), `${planId(configPath)}.pilot.yaml`)
     const verdict = verify(compiled, resolved, { file, ...(flags.has('max-tuples') ? { maxTuples: Number(flags.get('max-tuples')) } : {}) })
     console.log(formatVerdict(verdict))
     if (!verdict.ok) process.exitCode = 1
