@@ -78,6 +78,22 @@ npx tsx src/cli.ts build
 
 It writes three files in `output/<id>/`, named after the config: `<id>.tuples.csv` (the store), `<id>.report.json` (asked versus realized, per edge) and `<id>.report.html`. Open the HTML in a browser to see how the types connect, how big each tenant is, the shape of every edge (tuples per object, from both sides, with p50 and p90) and one sample neighborhood: a seeded random object and what is within two steps of it.
 
+#### What the report looks like
+
+These come from `npx tsx src/cli.ts build bench/gdrive.gen.json --scale 0.05`. The `plan` page has the same type graph, with projected tuple counts.
+
+How the types connect: a box per type with its object count, and an arrow per way a tuple can be written, sized by tuple count.
+
+<img src="images/report-types.png" width="800" alt="A graph of five types (user, document, folder, group, organization) joined by labeled arrows. Each arrow shows the relation and how many tuples were written.">
+
+The shape of an edge: how many tuples each object got (blue), and how many each user got from the other side (orange), with p50 and p90 marked.
+
+<img src="images/report-edges.png" width="800" alt="Two cards, folder viewer and group member. Each has a blue bar chart of tuples per object and an orange one of tuples per user, with p50 and p90 marked.">
+
+One neighborhood: a document, the users and folder it is connected to, and the 32 other objects they reach.
+
+<img src="images/report-neighborhood.png" width="800" alt="A document on the left, joined to three users and a folder in the middle column, which are joined to 30 documents, a folder and an organization on the right.">
+
 ## The config
 
 The config (a `*.gen.json` file) is the only input. Keep it in git with its seed: the same file always writes the same store.

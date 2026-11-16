@@ -1,3 +1,6 @@
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { resolve } from '../src/config.js'
 import { askedBins, binned, generate, layout, project } from '../src/generate.js'
@@ -60,6 +63,19 @@ describe('asked distributions', () => {
   it('are not drawn for nesting, wildcard or pool-dependent edges', () => {
     const { c, r } = setup('drive')
     for (const e of c.edges.filter((x) => x.kind === 'nesting' || x.kind === 'wildcard')) expect(askedBins(e, r.edges.get(e.key)!)).toBeUndefined()
+  })
+})
+
+describe('README images', () => {
+  it('exist, and are small enough for a repo', () => {
+    const root = fileURLToPath(new URL('..', import.meta.url))
+    const readme = readFileSync(join(root, 'README.md'), 'utf8')
+    const images = [...readme.matchAll(/(?:src="|\]\()(images\/[^"\s)]+)/g)].map((m) => m[1])
+    expect(images.length).toBeGreaterThan(0)
+    for (const image of images) {
+      expect(existsSync(join(root, image)), image).toBe(true)
+      expect(statSync(join(root, image)).size, `${image} is over 300 KB`).toBeLessThan(300_000)
+    }
   })
 })
 
