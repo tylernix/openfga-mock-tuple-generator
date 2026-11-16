@@ -9,6 +9,8 @@ import { inDir, latestConfig, newPlanId, OUTPUT_DIR, planId, runDir } from './na
 import { fileSink, type Format } from './output.js'
 import { parseCount, select } from './prompt.js'
 import { formatPlan, formatReport, formatVerdict } from './report.js'
+import { renderReportHtml } from './html.js'
+import { neighborhood } from './neighborhood.js'
 import { suggestTenant } from './tenants.js'
 import { verify } from './verify.js'
 
@@ -23,7 +25,8 @@ const USAGE = `fga-tuple-gen: mock tuple stores for any OpenFGA model
       Tenants, projected tuples per edge and warnings. Writes nothing.
   build [config.gen.json] [--out <file>] [--format csv|jsonl|yaml] [--tenants 0,3,9] [--scale 0.01] [--report <file>]
       Streams the store to <config id>.tuples.csv in the config's folder and prints what was realized per edge.
-      The full report (what was asked, the other side, clipped counts) is written beside it as <config id>.report.json.
+      The full report (what was asked, the other side, clipped counts) is written beside it as <config id>.report.json,
+      and the same as charts you open in a browser, <config id>.report.html.
       Exits 1 if a rule is broken.
   verify [config.gen.json] [--max-tuples 20000] [--scale 0.01] [--out <file>]
       Loads a pilot (whole tenants of the full store) into OpenFGA's in-memory server and compares answers.
@@ -181,7 +184,10 @@ async function main() {
     const reportPath = flags.has('report') ? inDir(flags.get('report')!, runDir(configPath)) : `${out.replace(/(\.tuples)?\.(csv|jsonl|yaml)$/, '')}.report.json`
     mkdirSync(dirname(reportPath), { recursive: true })
     writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n')
-    console.log(formatReport(report, reportPath))
+    const htmlPath = `${reportPath.replace(/\.json$/, '')}.html`
+    const hood = report.tenantSizes ? neighborhood(compiled, resolved, report.tenantSizes.medianTenant) : undefined
+    writeFileSync(htmlPath, renderReportHtml({ id: planId(configPath), report, compiled, counts: resolved.counts, neighborhood: hood }))
+    console.log(formatReport(report, { json: reportPath, html: htmlPath }))
     console.log(`\nWrote ${out}`)
     console.log('Next: verify has OpenFGA check a pilot of this store.')
     if (report.violationCount) process.exitCode = 1

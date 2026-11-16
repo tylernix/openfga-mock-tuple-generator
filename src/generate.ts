@@ -91,6 +91,13 @@ export function project(c: Compiled, r: Resolved, lay = layout(c, r)): Projectio
   return { perEdge, perTenant, shared, total }
 }
 
+/** `n` objects (or tenants) whose count falls in `from` to `to`, both inclusive. */
+export interface Bin {
+  from: number
+  to: number
+  n: number
+}
+
 export interface EdgeReport {
   key: string
   kind: EdgeKind
@@ -103,10 +110,14 @@ export interface EdgeReport {
   per: 'object' | 'subject'
   /** Realized count per covered object (or subject). */
   count?: { p50: number; p90: number; max: number; mean: number }
+  /** How many objects got each count: the shape behind `count`. */
+  histogram?: Bin[]
   /** Kolmogorov-Smirnov distance between realized counts and the asked distribution (0 is a perfect fit). */
   ks?: number
   /** The side that was not asked for: tuples per subject (or per object, when counted per subject). */
   other?: { of: string; pool: number; withAny: number; p50: number; p90: number; max: number; mean: number }
+  /** How many members of the other side got each count. */
+  otherHistogram?: Bin[]
   /** Objects that wanted more subjects than their pool holds. */
   clipped: number
   /** Objects skipped because nobody passed the gate. */
@@ -120,6 +131,8 @@ export interface EdgeReport {
 export interface Report {
   tuples: number
   tenants: { total: number; generated: number }
+  /** Tuples per tenant, binned. The shared block is not counted. `medianTenant` is the index of a middle-sized tenant. */
+  tenantSizes?: { bins: Bin[]; min: number; median: number; max: number; medianTenant: number }
   edges: EdgeReport[]
   /** Broken rules. A store with any is not to be used. */
   violations: string[]
@@ -166,6 +179,25 @@ interface Scope {
 }
 
 const bump = (hist: Map<number, number>, k: number) => hist.set(k, (hist.get(k) ?? 0) + 1)
+
+/** Exact bins when there are few distinct values, else bins that grow geometrically, so a long tail stays readable. */
+export function binned(hist: Map<number, number>, maxBins = 24): Bin[] {
+  const keys = [...hist.keys()].sort((a, b) => a - b)
+  if (!keys.length) return []
+  if (keys.length <= maxBins) return keys.map((k) => ({ from: k, to: k, n: hist.get(k)! }))
+  const lo = keys[0]
+  const hi = keys[keys.length - 1]
+  const bounds = new Set<number>([lo])
+  for (let i = 1; i < maxBins; i++) bounds.add(Math.round((lo + 1) * Math.pow((hi + 1) / (lo + 1), i / maxBins)) - 1)
+  const starts = [...bounds].filter((b) => b > lo || b === lo).sort((a, b) => a - b)
+  const bins: Bin[] = starts.map((from, i) => ({ from, to: i + 1 < starts.length ? starts[i + 1] - 1 : hi, n: 0 }))
+  for (const k of keys) {
+    let j = bins.length - 1
+    while (j > 0 && bins[j].from > k) j--
+    bins[j].n += hist.get(k)!
+  }
+  return bins.filter((b) => b.n > 0)
+}
 
 function quantiles(hist: Map<number, number>) {
   const keys = [...hist.keys()].sort((a, b) => a - b)
@@ -593,10 +625,18 @@ export function generate(c: Compiled, r: Resolved, opts: GenerateOptions): Repor
   const tenantEdges = order.filter((e) => !isGlobal(e.objectType))
   const chosen = opts.tenants ?? Array.from({ length: lay.tenants }, (_, t) => t)
   for (const t of chosen) if (!Number.isInteger(t) || t < 0 || t >= lay.tenants) throw new Error(`tenant ${t} is out of range (0 to ${lay.tenants - 1})`)
+  const written = () => {
+    let n = 0
+    for (const st of stats.values()) n += st.tuples
+    return n
+  }
+  const sizes: number[] = []
   chosen.forEach((t, done) => {
+    const before = written()
     const scope = newScope(t)
     for (const e of tenantEdges) run(scope, e)
     checkContainers(scope)
+    sizes.push(written() - before)
     opts.onTenant?.(done + 1, chosen.length)
   })
   for (const [key, arr] of runWide) fold(arr, stats.get(key)!)
@@ -627,9 +667,9 @@ export function generate(c: Compiled, r: Resolved, opts: GenerateOptions): Repor
       covered: st.covered,
       coverage: st.eligible ? st.covered / st.eligible : 0,
       per: perSubject ? 'subject' : 'object',
-      ...(st.counts.size ? { count: quantiles(st.counts) } : {}),
+      ...(st.counts.size ? { count: quantiles(st.counts), histogram: binned(st.counts) } : {}),
       ...(ks !== undefined ? { ks } : {}),
-      ...(st.otherPool ? { other: { of: perSubject ? e.objectType : e.subjectType, pool: st.otherPool, withAny: st.otherAny, ...quantiles(st.other) } } : {}),
+      ...(st.otherPool ? { other: { of: perSubject ? e.objectType : e.subjectType, pool: st.otherPool, withAny: st.otherAny, ...quantiles(st.other) }, ...(st.other.size ? { otherHistogram: binned(st.other) } : {}) } : {}),
       clipped: st.clipped,
       gateEmpty: st.gateEmpty,
       crossTenant: st.cross,
@@ -637,9 +677,15 @@ export function generate(c: Compiled, r: Resolved, opts: GenerateOptions): Repor
       ...(e.kind === 'nesting' ? { depth: { asked: cfg.depth, max: st.maxDepth, containers: Object.fromEntries([...st.depths].sort((a, b) => a[0] - b[0])) } } : {}),
     }
   })
+  const bySize = chosen.map((t, i) => ({ t, size: sizes[i] })).sort((a, b) => a.size - b.size || a.t - b.t)
+  const sizeHist = new Map<number, number>()
+  for (const s of sizes) bump(sizeHist, s)
+  // Few tenants need few bins, or every bar holds one tenant and the chart says nothing.
+  const sizeBins = Math.min(24, Math.max(6, Math.ceil(2 * Math.sqrt(sizes.length))))
   return {
     tuples: edges.reduce((sum, e) => sum + e.tuples, 0),
     tenants: { total: lay.tenants, generated: chosen.length },
+    ...(bySize.length ? { tenantSizes: { bins: binned(sizeHist, sizeBins), min: bySize[0].size, median: bySize[Math.floor(bySize.length / 2)].size, max: bySize[bySize.length - 1].size, medianTenant: bySize[Math.floor(bySize.length / 2)].t } } : {}),
     edges,
     violations,
     violationCount,

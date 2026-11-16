@@ -76,6 +76,8 @@ npx tsx src/cli.ts verify
 npx tsx src/cli.ts build
 ```
 
+It writes three files in `output/<id>/`, named after the config: `<id>.tuples.csv` (the store), `<id>.report.json` (asked versus realized, per edge) and `<id>.report.html`. Open the HTML in a browser to see how the types connect, how big each tenant is, the shape of every edge (tuples per object, from both sides, with p50 and p90) and one sample neighborhood: a seeded random object and what is within two steps of it.
+
 ## The config
 
 The config (a `*.gen.json` file) is the only input. Keep it in git with its seed: the same file always writes the same store.

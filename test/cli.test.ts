@@ -138,7 +138,7 @@ describe('the README steps, with no config file named', () => {
 
     const build = run(dir, ['build'])
     expect(build.status, build.stderr).toBe(0)
-    expect(readdirSync(join(dir, 'output', id)).sort()).toEqual([`${id}.gen.json`, `${id}.report.json`, `${id}.tuples.csv`])
+    expect(readdirSync(join(dir, 'output', id)).sort()).toEqual([`${id}.gen.json`, `${id}.report.html`, `${id}.report.json`, `${id}.tuples.csv`])
     expect(readdirSync(dir)).toEqual(['output'])
   })
 
@@ -150,7 +150,7 @@ describe('the README steps, with no config file named', () => {
     const second = run(dir, ['build'])
     expect(first.status, first.stderr).toBe(0)
     expect(second.status, second.stderr).toBe(0)
-    expect(readdirSync(join(dir, 'output', '20200101-0000')).sort()).toEqual(['20200101-0000.gen.json', '20200101-0000.report.json', '20200101-0000.tuples.csv'])
+    expect(readdirSync(join(dir, 'output', '20200101-0000')).sort()).toEqual(['20200101-0000.gen.json', '20200101-0000.report.html', '20200101-0000.report.json', '20200101-0000.tuples.csv'])
   })
 
   it('a scaled or partial build gets its own name and cannot overwrite the full store', () => {
@@ -221,6 +221,10 @@ describe('the README steps, with no config file named', () => {
     const report = JSON.parse(readFileSync(join(dir, 'output', 'gdrive', 'gdrive.scale-0.01.report.json'), 'utf8'))
     expect(report.edges[0]).toHaveProperty('asked')
     expect(build.stdout).toContain('gdrive.scale-0.01.report.json')
+    expect(build.stdout).toContain('gdrive.scale-0.01.report.html')
+    const html = readFileSync(join(dir, 'output', 'gdrive', 'gdrive.scale-0.01.report.html'), 'utf8')
+    expect(html).toContain('<svg')
+    expect(html).toContain('document#viewer:user')
   })
 
   it('shows each default as [default: N], and Enter writes exactly that number', () => {
@@ -246,7 +250,7 @@ describe('the README steps, with no config file named', () => {
     const build = run(dir, ['build'])
     expect(build.status, build.stderr).toBe(0)
     expect(build.stdout).toContain(`Using ${join('output', '20200202-0000.gen.json')}`)
-    expect(readdirSync(join(dir, 'output', '20200202-0000'))).toEqual(['20200202-0000.report.json', '20200202-0000.tuples.csv'])
+    expect(readdirSync(join(dir, 'output', '20200202-0000'))).toEqual(['20200202-0000.report.html', '20200202-0000.report.json', '20200202-0000.tuples.csv'])
   })
 
   it('still finds a config left in the project folder', () => {

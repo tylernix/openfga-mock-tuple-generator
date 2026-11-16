@@ -36,8 +36,8 @@ export function formatPlan(c: Compiled, r: Resolved, lay: Layout, projection: Pr
   return out.join('\n')
 }
 
-/** `detailPath` is where the full report was written; the table here is kept narrow enough for a terminal. */
-export function formatReport(report: Report, detailPath?: string): string {
+/** `detail` is where the full report was written; the table here is kept narrow enough for a terminal. */
+export function formatReport(report: Report, detail?: { json: string; html: string }): string {
   const out: string[] = []
   out.push(`${num(report.tuples)} tuples from ${num(report.tenants.generated)} of ${num(report.tenants.total)} tenant(s) in ${(report.elapsedMs / 1000).toFixed(1)}s, peak memory ${num(report.peakRssMb)} MB.`)
   out.push('', 'Realized, per edge:')
@@ -52,7 +52,7 @@ export function formatReport(report: Report, detailPath?: string): string {
     ])
   }
   out.push(table(rows))
-  if (detailPath) out.push('', `Full detail per edge: ${detailPath}`)
+  if (detail) out.push('', `Full detail per edge: ${detail.json}`, `Charts, open in a browser: ${detail.html}`)
   const clipped = report.edges.filter((e) => e.clipped)
   if (clipped.length) out.push(`Clipped (wanted more than the pool holds): ${clipped.map((e) => `${e.key} ${num(e.clipped)}`).join(', ')}`)
   const nested = report.edges.filter((e) => e.depth)
