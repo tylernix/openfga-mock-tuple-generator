@@ -37,18 +37,39 @@ svg text { font-family: system-ui, sans-serif; } .legend span { display: inline-
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
 `
 
-/** Bars for binned counts. Equal-width bars, so geometric bins read as a log axis. */
-function bars(bins: Bin[], o: { width: number; height?: number; marks?: { label: string; value: number }[]; color?: string }): string {
+/** 1, 2 or 5 times a power of ten, at or above `v`: a top for the y axis that reads cleanly. */
+export function niceTop(v: number): number {
+  if (!(v > 0)) return 1
+  const p = Math.pow(10, Math.floor(Math.log10(v)))
+  for (const m of [1, 2, 5, 10]) if (m * p >= v * (1 - 1e-9)) return m * p
+  return 10 * p
+}
+
+/**
+ * Bars for binned counts. Equal-width bars, so geometric bins read as a log axis. The y axis is a count,
+ * or with `yAs: 'share'` the share of the total, and both axes are titled.
+ */
+function bars(bins: Bin[], o: { width: number; height?: number; marks?: { label: string; value: number }[]; color?: string; yLabel: string; xLabel: string; yAs?: 'share' }): string {
   const h = o.height ?? 84
   const top = 16
+  const left = 46
   const w = o.width
-  const max = Math.max(...bins.map((b) => b.n), 1)
-  const bw = (w - 8) / bins.length
+  const share = o.yAs === 'share'
+  const total = bins.reduce((s, b) => s + b.n, 0) || 1
+  const valueOf = (b: Bin) => (share ? b.n / total : b.n)
+  const topValue = niceTop(Math.max(...bins.map(valueOf), share ? 1e-9 : 1))
+  const bw = (w - left - 4) / bins.length
   const range = (b: Bin) => (b.from === b.to ? String(b.from) : `${b.from} to ${b.to}`)
+  const tickText = (v: number) => (share ? `${+(v * 100).toFixed(1)}%` : v >= 1000 ? compact(v) : String(+v.toFixed(1)))
+  const ticks = !share && topValue < 2 ? [0, topValue] : [0, topValue / 2, topValue]
+  const yOf = (v: number) => top + h - (v / topValue) * h
+  const grid = ticks
+    .map((v) => `<line x1="${left}" x2="${w - 4}" y1="${yOf(v).toFixed(1)}" y2="${yOf(v).toFixed(1)}" stroke="#e6eaf0"/><text x="${left - 5}" y="${(yOf(v) + 3).toFixed(1)}" font-size="10" fill="#566" text-anchor="end">${tickText(v)}</text>`)
+    .join('')
   const rects = bins
     .map((b, i) => {
-      const bh = Math.max(1, (b.n / max) * h)
-      return `<rect x="${(4 + i * bw + 0.5).toFixed(1)}" y="${(top + h - bh).toFixed(1)}" width="${Math.max(1, bw - 1).toFixed(1)}" height="${bh.toFixed(1)}" fill="${o.color ?? '#3b6fb6'}"><title>${range(b)}: ${num(b.n)}</title></rect>`
+      const bh = Math.max(1, (valueOf(b) / topValue) * h)
+      return `<rect x="${(left + i * bw + 0.5).toFixed(1)}" y="${(top + h - bh).toFixed(1)}" width="${Math.max(1, bw - 1).toFixed(1)}" height="${bh.toFixed(1)}" fill="${o.color ?? '#3b6fb6'}"><title>${range(b)}: ${share ? tickText(valueOf(b)) : num(b.n)}</title></rect>`
     })
     .join('')
   const at = (v: number) => {
@@ -59,14 +80,15 @@ function bars(bins: Bin[], o: { width: number; height?: number; marks?: { label:
   for (const m of o.marks ?? []) marks.set(at(m.value), [...(marks.get(at(m.value)) ?? []), m.label])
   const lines = [...marks.entries()]
     .map(([j, labels]) => {
-      const x = 4 + (j + 0.5) * bw
-      const anchor = x > w - 40 ? 'end' : x < 40 ? 'start' : 'middle'
+      const x = left + (j + 0.5) * bw
+      const anchor = x > w - 40 ? 'end' : x < left + 30 ? 'start' : 'middle'
       return `<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${top - 2}" y2="${top + h}" stroke="#c4483f" stroke-dasharray="3 2"/><text x="${x.toFixed(1)}" y="${top - 5}" font-size="10" fill="#c4483f" text-anchor="${anchor}">${labels.join(' = ')}</text>`
     })
     .join('')
-  const axis = `<line x1="4" x2="${w - 4}" y1="${top + h + 0.5}" y2="${top + h + 0.5}" stroke="#9aa4b2"/>`
-  const labels = `<text x="4" y="${top + h + 14}" font-size="10" fill="#566">${bins[0].from}</text><text x="${w - 4}" y="${top + h + 14}" font-size="10" fill="#566" text-anchor="end">${bins[bins.length - 1].to}</text>`
-  return `<svg viewBox="0 0 ${w} ${top + h + 20}" width="100%" role="img">${rects}${axis}${lines}${labels}</svg>`
+  const axes = `<line x1="${left}" x2="${w - 4}" y1="${top + h + 0.5}" y2="${top + h + 0.5}" stroke="#9aa4b2"/><line x1="${left + 0.5}" x2="${left + 0.5}" y1="${top}" y2="${top + h}" stroke="#9aa4b2"/>`
+  const labels = `<text x="${left}" y="${top + h + 14}" font-size="10" fill="#566">${bins[0].from}</text><text x="${w - 4}" y="${top + h + 14}" font-size="10" fill="#566" text-anchor="end">${bins[bins.length - 1].to}</text>`
+  const titles = `<text x="${left + (w - left - 4) / 2}" y="${top + h + 28}" font-size="10" fill="#344" text-anchor="middle">${esc(o.xLabel)}</text><text transform="translate(11 ${top + h / 2}) rotate(-90)" font-size="10" fill="#344" text-anchor="middle">${esc(o.yLabel)}</text>`
+  return `<svg class="chart" viewBox="0 0 ${w} ${top + h + 33}" width="100%" role="img">${grid}${rects}${axes}${lines}${labels}${titles}</svg>`
 }
 
 interface GraphEdge {
@@ -168,15 +190,15 @@ function edgeCard(e: EdgeReport, subjectType: string, objectType: string): strin
   let body = ''
   if (e.depth) {
     const bins = Object.entries(e.depth.containers).map(([d, n]) => ({ from: Number(d), to: Number(d), n }))
-    body += `<div>${bins.length ? bars(bins, { width: 300, marks: [{ label: `asked ${e.depth.asked}`, value: e.depth.asked }] }) : ''}</div><p class="cap">Containers by their deepest object. Asked ${e.depth.asked}, reached ${e.depth.max}.</p>`
+    body += `<div>${bins.length ? bars(bins, { width: 300, yLabel: '# containers', xLabel: 'depth of the deepest object', marks: [{ label: `asked ${e.depth.asked}`, value: e.depth.asked }] }) : ''}</div><p class="cap">Containers by their deepest object. Asked ${e.depth.asked}, reached ${e.depth.max}.</p>`
   } else if (e.histogram?.length && e.count) {
     const side = e.per === 'subject' ? subjectType : objectType
-    body += `<div>${e.histogram.length > 1 ? bars(e.histogram, { width: 300, marks: [{ label: 'p50', value: e.count.p50 }, { label: 'p90', value: e.count.p90 }] }) : ''}</div><p class="cap">Tuples per ${esc(side)} (each ${esc(side)} that has any): p50 ${e.count.p50} · p90 ${e.count.p90} · max ${e.count.max}</p>`
+    body += `<div>${e.histogram.length > 1 ? bars(e.histogram, { width: 300, yLabel: `# ${side}`, xLabel: `tuples per ${side}`, marks: [{ label: 'p50', value: e.count.p50 }, { label: 'p90', value: e.count.p90 }] }) : ''}</div><p class="cap">Tuples per ${esc(side)} (each ${esc(side)} that has any): p50 ${e.count.p50} · p90 ${e.count.p90} · max ${e.count.max}</p>`
   } else {
     body += `<p class="cap">${esc(e.asked)}</p>`
   }
   if (e.otherHistogram?.length && e.other) {
-    body += `<div>${bars(e.otherHistogram, { width: 300, color: '#d9822b', marks: [{ label: 'p50', value: e.other.p50 }, { label: 'p90', value: e.other.p90 }] })}</div><p class="cap">The other side, tuples per ${esc(e.other.of)}: p50 ${e.other.p50} · p90 ${e.other.p90} · max ${e.other.max} · ${pct(e.other.withAny / e.other.pool)} have any</p>`
+    body += `<div>${bars(e.otherHistogram, { width: 300, color: '#d9822b', yLabel: `# ${e.other.of}`, xLabel: `tuples per ${e.other.of}`, marks: [{ label: 'p50', value: e.other.p50 }, { label: 'p90', value: e.other.p90 }] })}</div><p class="cap">The other side, tuples per ${esc(e.other.of)}: p50 ${e.other.p50} · p90 ${e.other.p90} · max ${e.other.max} · ${pct(e.other.withAny / e.other.pool)} have any</p>`
   }
   return `<div class="card"><h3>${esc(e.key)}</h3><div class="sub">${esc(sub)}</div>${body}</div>`
 }
@@ -240,7 +262,7 @@ export function renderPlanHtml(input: PlanHtmlInput): string {
   for (const s of sizes) sizeHist.set(Math.round(s), (sizeHist.get(Math.round(s)) ?? 0) + 1)
   const median = sizes.length ? sizes[Math.floor(sizes.length / 2)] : 0
   const sizeBlock = lay.tenants > 1
-    ? `<h2>Projected tuples per tenant</h2><p class="note">${num(lay.tenants)} ${esc(r.plan.type ?? 'tenant')}(s), skew ${r.skew}. Smallest about ${num(sizes[0])}, median about ${num(median)}, largest about ${num(sizes[sizes.length - 1])}${p.shared >= 1 ? `; the shared block adds about ${num(p.shared)}` : ''}. Bars are equal-width bins that grow along the axis, so a long tail stays visible.</p>${bars(binned(sizeHist, Math.min(24, Math.max(6, Math.ceil(2 * Math.sqrt(sizes.length))))), { width: 900, height: 110, color: '#4c9a6a', marks: [{ label: 'median', value: Math.round(median) }] })}`
+    ? `<h2>Projected tuples per tenant</h2><p class="note">${num(lay.tenants)} ${esc(r.plan.type ?? 'tenant')}(s), skew ${r.skew}. Smallest about ${num(sizes[0])}, median about ${num(median)}, largest about ${num(sizes[sizes.length - 1])}${p.shared >= 1 ? `; the shared block adds about ${num(p.shared)}` : ''}. Bars are equal-width bins that grow along the axis, so a long tail stays visible.</p>${bars(binned(sizeHist, Math.min(24, Math.max(6, Math.ceil(2 * Math.sqrt(sizes.length))))), { width: 900, height: 110, color: '#4c9a6a', yLabel: '# tenants', xLabel: 'projected tuples in the tenant', marks: [{ label: 'median', value: Math.round(median) }] })}`
     : ''
   const layoutLines = [
     r.plan.above.length ? `Above the tenant, shared by all: ${r.plan.above.join(', ')}.` : '',
@@ -255,7 +277,7 @@ export function renderPlanHtml(input: PlanHtmlInput): string {
     const sub = `${e.kind}${isGated(e) ? ', gated' : ''} · about ${num(projected)} tuples`
     const side = cfg.per === 'subject' && (e.kind === 'assignment' || e.kind === 'block') ? e.subjectType : e.objectType
     const body = asked
-      ? `<div>${asked.bins.length > 1 ? bars(asked.bins, { width: 300, marks: [{ label: 'p50', value: asked.p50 }, { label: 'p90', value: asked.p90 }] }) : ''}</div><p class="cap">As configured: ${esc(askedText(e, cfg))}. Tuples per ${esc(side)} that has any: p50 ${asked.p50} · p90 ${asked.p90}.</p>`
+      ? `<div>${asked.bins.length > 1 ? bars(asked.bins, { width: 300, yAs: 'share', yLabel: `% of ${side}`, xLabel: `tuples per ${side}`, marks: [{ label: 'p50', value: asked.p50 }, { label: 'p90', value: asked.p90 }] }) : ''}</div><p class="cap">As configured: ${esc(askedText(e, cfg))}. Tuples per ${esc(side)} that has any: p50 ${asked.p50} · p90 ${asked.p90}.</p>`
       : `<p class="cap">As configured: ${esc(askedText(e, cfg))}.</p>`
     return `<div class="card"><h3>${esc(e.key)}</h3><div class="sub">${esc(sub)}</div>${body}</div>`
   })
@@ -292,7 +314,7 @@ export function renderReportHtml(input: HtmlInput): string {
   const warnings = report.warnings.length ? `<div class="banner warn"><b>Warnings</b><ul>${report.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>` : ''
   const sizes = report.tenantSizes
   const sizeBlock = sizes
-    ? `<h2>Tuples per tenant</h2><p class="note">${num(report.tenants.generated)} tenants. Smallest ${num(sizes.min)}, median ${num(sizes.median)}, largest ${num(sizes.max)}. Bars are equal-width bins that grow along the axis, so a long tail stays visible.</p>${bars(sizes.bins, { width: 900, height: 110, color: '#4c9a6a', marks: [{ label: 'median', value: sizes.median }] })}`
+    ? `<h2>Tuples per tenant</h2><p class="note">${num(report.tenants.generated)} tenants. Smallest ${num(sizes.min)}, median ${num(sizes.median)}, largest ${num(sizes.max)}. Bars are equal-width bins that grow along the axis, so a long tail stays visible.</p>${bars(sizes.bins, { width: 900, height: 110, color: '#4c9a6a', yLabel: '# tenants', xLabel: 'tuples in the tenant', marks: [{ label: 'median', value: sizes.median }] })}`
     : ''
   const hood = input.neighborhood
   const hoodBlock = hood ? hoodSection(hood, compiled, 'A sample:') : input.noSample ? `<h2>One neighborhood</h2><p class="note">${esc(input.noSample)}</p>` : ''

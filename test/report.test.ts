@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { resolve } from '../src/config.js'
 import { askedBins, binned, generate, layout, project } from '../src/generate.js'
-import { renderPlanHtml, renderReportHtml } from '../src/html.js'
+import { renderPlanHtml, renderReportHtml, niceTop } from '../src/html.js'
 import { medianTenant, neighborhood, sampleSkipReason } from '../src/neighborhood.js'
 import { memorySink } from '../src/output.js'
 import { config, model } from './helpers.js'
@@ -60,6 +60,42 @@ describe('asked distributions', () => {
   it('are not drawn for nesting, wildcard or pool-dependent edges', () => {
     const { c, r } = setup('drive')
     for (const e of c.edges.filter((x) => x.kind === 'nesting' || x.kind === 'wildcard')) expect(askedBins(e, r.edges.get(e.key)!)).toBeUndefined()
+  })
+})
+
+describe('chart axes', () => {
+  const charts = (html: string) => html.split('<svg class="chart"').slice(1).map((chunk) => chunk.slice(0, chunk.indexOf('</svg>')))
+
+  it('rounds the top of the y axis to 1, 2 or 5 times a power of ten', () => {
+    expect(niceTop(1)).toBe(1)
+    expect(niceTop(3)).toBe(5)
+    expect(niceTop(7)).toBe(10)
+    expect(niceTop(12)).toBe(20)
+    expect(niceTop(0.3)).toBe(0.5)
+    expect(niceTop(0)).toBe(1)
+  })
+
+  it('gives every chart on the report page a y axis with ticks and both titles', () => {
+    const { c, r, report } = setup('drive')
+    const html = renderReportHtml({ id: 'x', report, compiled: c, counts: r.counts })
+    const all = charts(html)
+    expect(all.length).toBeGreaterThan(3)
+    for (const svg of all) {
+      expect(svg).toContain('rotate(-90)')
+      expect(svg).toMatch(/text-anchor="end">0<\/text>/)
+      expect(svg).toMatch(/y="[\d.]+" font-size="10" fill="#344" text-anchor="middle">[^<]+<\/text>/)
+    }
+  })
+
+  it('gives every chart on the plan page a y axis, as a share for the asked distributions', () => {
+    const c = model('drive')
+    const r = resolve(c, config('drive', { counts: small('drive') }))
+    const lay = layout(c, r)
+    const html = renderPlanHtml({ id: 'x', compiled: c, resolved: r, layout: lay, projection: project(c, r, lay) })
+    const all = charts(html)
+    expect(all.length).toBeGreaterThan(1)
+    for (const svg of all) expect(svg).toContain('rotate(-90)')
+    expect(all.some((svg) => svg.includes('%</text>'))).toBe(true)
   })
 })
 
