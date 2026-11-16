@@ -1,6 +1,6 @@
 # OpenFGA Mock Tuple Generator
 
-Builds a full-size mock tuple store for any OpenFGA model, and has OpenFGA check it.
+Builds a full-size mock tuple store for any OpenFGA model, then validates it using OpenFGA.
 
 You give it a model and a config (how many of each type, and a few shape numbers per relation). It writes tuples you can [load](#load-the-tuples-into-fga) with `fga tuple write` or `fga store import`.
 
