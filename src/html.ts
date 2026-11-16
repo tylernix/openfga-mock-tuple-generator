@@ -1,4 +1,5 @@
-import type { Bin, EdgeReport, Report } from './generate.js'
+import type { Resolved } from './config.js'
+import { askedBins, askedText, binned, isGated, type Bin, type EdgeReport, type Layout, type Projection, type Report } from './generate.js'
 import type { Compiled } from './model.js'
 import type { Neighborhood } from './neighborhood.js'
 
@@ -10,6 +11,8 @@ export interface HtmlInput {
   /** Objects per type in the whole store. */
   counts: Record<string, number>
   neighborhood?: Neighborhood
+  /** Why there is no neighborhood, when there is none. */
+  noSample?: string
 }
 
 const esc = (s: string) => s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
@@ -66,8 +69,14 @@ function bars(bins: Bin[], o: { width: number; height?: number; marks?: { label:
   return `<svg viewBox="0 0 ${w} ${top + h + 20}" width="100%" role="img">${rects}${axis}${lines}${labels}</svg>`
 }
 
-function modelGraph(input: HtmlInput): string {
-  const { compiled, report, counts } = input
+interface GraphEdge {
+  key: string
+  tuples: number
+  /** Hover text. */
+  tip: string
+}
+
+function modelGraph(compiled: Compiled, counts: Record<string, number>, edges: GraphEdge[]): string {
   const used = new Set(compiled.edges.flatMap((e) => [e.objectType, e.subjectType]))
   const types = compiled.types.filter((t) => used.has(t))
   const n = types.length
@@ -82,9 +91,9 @@ function modelGraph(input: HtmlInput): string {
     return [t, { x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a), hw: Math.max(48, 4.4 * t.length + 12), hh: 21 }]
   }))
   const color = (t: string) => PALETTE[compiled.types.indexOf(t) % PALETTE.length]
-  const maxTuples = Math.max(...report.edges.map((e) => e.tuples), 1)
+  const maxTuples = Math.max(...edges.map((e) => e.tuples), 1)
   const widthOf = (tuples: number) => 1 + (5 * Math.log10(1 + tuples)) / Math.log10(1 + maxTuples)
-  const byKey = new Map(report.edges.map((e) => [e.key, e]))
+  const byKey = new Map(edges.map((e) => [e.key, e]))
 
   const clip = (p: { x: number; y: number; hw: number; hh: number }, tx: number, ty: number) => {
     const dx = tx - p.x
@@ -104,7 +113,7 @@ function modelGraph(input: HtmlInput): string {
     const a = pos.get(e.subjectType)!
     const b = pos.get(e.objectType)!
     const label = `${e.relation}${e.subjectRelation ? `(${e.subjectRelation})` : ''} ${compact(r.tuples)}`
-    const tip = `${e.key}: ${num(r.tuples)} tuples${r.count ? `, per ${r.per === 'subject' ? e.subjectType : e.objectType}: p50 ${r.count.p50}, p90 ${r.count.p90}, max ${r.count.max}` : ''}`
+    const tip = r.tip
     const sw = widthOf(r.tuples).toFixed(1)
     let d: string
     let lx: number
@@ -162,7 +171,7 @@ function edgeCard(e: EdgeReport, subjectType: string, objectType: string): strin
     body += `<div>${bins.length ? bars(bins, { width: 300, marks: [{ label: `asked ${e.depth.asked}`, value: e.depth.asked }] }) : ''}</div><p class="cap">Containers by their deepest object. Asked ${e.depth.asked}, reached ${e.depth.max}.</p>`
   } else if (e.histogram?.length && e.count) {
     const side = e.per === 'subject' ? subjectType : objectType
-    body += `<div>${bars(e.histogram, { width: 300, marks: [{ label: 'p50', value: e.count.p50 }, { label: 'p90', value: e.count.p90 }] })}</div><p class="cap">Tuples per ${esc(side)} (each ${esc(side)} that has any): p50 ${e.count.p50} · p90 ${e.count.p90} · max ${e.count.max}</p>`
+    body += `<div>${e.histogram.length > 1 ? bars(e.histogram, { width: 300, marks: [{ label: 'p50', value: e.count.p50 }, { label: 'p90', value: e.count.p90 }] }) : ''}</div><p class="cap">Tuples per ${esc(side)} (each ${esc(side)} that has any): p50 ${e.count.p50} · p90 ${e.count.p90} · max ${e.count.max}</p>`
   } else {
     body += `<p class="cap">${esc(e.asked)}</p>`
   }
@@ -206,6 +215,73 @@ function hoodGraph(h: Neighborhood, compiled: Compiled): string {
   return `${legend}<svg viewBox="0 0 ${W} ${H}" width="100%" role="img">${heads}${lines}${dots}</svg>`
 }
 
+function hoodSection(h: Neighborhood, compiled: Compiled, lead: string): string {
+  return `<h2>One neighborhood</h2><p class="note">${lead} ${esc(h.root)} in tenant ${h.tenant} (a middle-sized one), and what is connected to it within ${h.hops} steps: ${h.nodes.length} objects, ${h.edges.length} tuples${h.capped ? '. Nearest first; more neighbors exist and were left out to keep this readable' : ''}. The pick is seeded, so the same config shows the same piece. Hover a dot or a line for its name.</p>${hoodGraph(h, compiled)}`
+}
+
+const GRAPH_NOTE = 'Each box is a type, with how many objects it has. Each arrow is one way a tuple can be written, from the subject to the object it is written on. Line width follows the tuple count (log scale).'
+
+export interface PlanHtmlInput {
+  id: string
+  compiled: Compiled
+  resolved: Resolved
+  layout: Layout
+  projection: Projection
+  neighborhood?: Neighborhood
+  /** Why there is no neighborhood, when there is none. */
+  noSample?: string
+}
+
+/** The page `plan` writes: what the config says will be built, before anything is. */
+export function renderPlanHtml(input: PlanHtmlInput): string {
+  const { compiled, resolved: r, layout: lay, projection: p, id } = input
+  const sizes = [...p.perTenant].sort((a, b) => a - b)
+  const sizeHist = new Map<number, number>()
+  for (const s of sizes) sizeHist.set(Math.round(s), (sizeHist.get(Math.round(s)) ?? 0) + 1)
+  const median = sizes.length ? sizes[Math.floor(sizes.length / 2)] : 0
+  const sizeBlock = lay.tenants > 1
+    ? `<h2>Projected tuples per tenant</h2><p class="note">${num(lay.tenants)} ${esc(r.plan.type ?? 'tenant')}(s), skew ${r.skew}. Smallest about ${num(sizes[0])}, median about ${num(median)}, largest about ${num(sizes[sizes.length - 1])}${p.shared >= 1 ? `; the shared block adds about ${num(p.shared)}` : ''}. Bars are equal-width bins that grow along the axis, so a long tail stays visible.</p>${bars(binned(sizeHist, Math.min(24, Math.max(6, Math.ceil(2 * Math.sqrt(sizes.length))))), { width: 900, height: 110, color: '#4c9a6a', marks: [{ label: 'median', value: Math.round(median) }] })}`
+    : ''
+  const layoutLines = [
+    r.plan.above.length ? `Above the tenant, shared by all: ${r.plan.above.join(', ')}.` : '',
+    r.plan.inside.length ? `Inside a tenant by the model: ${r.plan.inside.join(', ')}.` : '',
+    r.plan.assumed.length && lay.tenants > 1 ? `Split per tenant by assumption: ${r.plan.assumed.join(', ')}.` : '',
+  ].filter(Boolean)
+  const warnings = r.warnings.length ? `<div class="banner warn"><b>Warnings</b><ul>${r.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>` : ''
+  const cards = compiled.edges.map((e) => {
+    const cfg = r.edges.get(e.key)!
+    const projected = p.perEdge.get(e.key) ?? 0
+    const asked = askedBins(e, cfg)
+    const sub = `${e.kind}${isGated(e) ? ', gated' : ''} · about ${num(projected)} tuples`
+    const side = cfg.per === 'subject' && (e.kind === 'assignment' || e.kind === 'block') ? e.subjectType : e.objectType
+    const body = asked
+      ? `<div>${asked.bins.length > 1 ? bars(asked.bins, { width: 300, marks: [{ label: 'p50', value: asked.p50 }, { label: 'p90', value: asked.p90 }] }) : ''}</div><p class="cap">As configured: ${esc(askedText(e, cfg))}. Tuples per ${esc(side)} that has any: p50 ${asked.p50} · p90 ${asked.p90}.</p>`
+      : `<p class="cap">As configured: ${esc(askedText(e, cfg))}.</p>`
+    return `<div class="card"><h3>${esc(e.key)}</h3><div class="sub">${esc(sub)}</div>${body}</div>`
+  })
+  const graphEdges = compiled.edges.map((e) => {
+    const projected = p.perEdge.get(e.key) ?? 0
+    return { key: e.key, tuples: projected, tip: `${e.key}: about ${num(projected)} tuples. ${askedText(e, r.edges.get(e.key)!)}` }
+  })
+  const hood = input.neighborhood
+  const hoodBlock = hood ? hoodSection(hood, compiled, 'Not projected, generated: one middle-sized tenant was built in memory for this picture, so it is a real sample.') : input.noSample ? `<h2>One neighborhood</h2><p class="note">${esc(input.noSample)}</p>` : ''
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>${esc(id)} plan</title><style>${CSS}</style></head><body>
+<h1>${esc(id)}: plan</h1>
+<p class="meta">About ${num(p.total)} tuples across ${num(lay.tenants)} tenant(s). Nothing has been built. These are projections from the config; the sample at the end is the one thing actually generated. Gated and nesting edges are upper estimates. Run <code>build</code> for the realized numbers.</p>
+${layoutLines.length ? `<p class="note">${layoutLines.map(esc).join(' ')}</p>` : ''}${warnings}
+<h2>How the types connect</h2>
+<p class="note">${GRAPH_NOTE} Labels show the relation and the projected tuples.</p>
+${modelGraph(compiled, r.counts, graphEdges)}
+${sizeBlock}
+<h2>What each edge was asked for</h2>
+<p class="note">Drawn from the config, not from tuples. Red dashes mark p50 and p90. Edges whose count depends on the pool, on nesting levels or on a gate show only their description.</p>
+<div class="grid">${cards.join('')}</div>
+${hoodBlock}
+</body></html>
+`
+}
+
 export function renderReportHtml(input: HtmlInput): string {
   const { report, compiled, id } = input
   const typeOf = new Map(compiled.edges.map((e) => [e.key, e]))
@@ -219,12 +295,14 @@ export function renderReportHtml(input: HtmlInput): string {
     ? `<h2>Tuples per tenant</h2><p class="note">${num(report.tenants.generated)} tenants. Smallest ${num(sizes.min)}, median ${num(sizes.median)}, largest ${num(sizes.max)}. Bars are equal-width bins that grow along the axis, so a long tail stays visible.</p>${bars(sizes.bins, { width: 900, height: 110, color: '#4c9a6a', marks: [{ label: 'median', value: sizes.median }] })}`
     : ''
   const hood = input.neighborhood
-  const hoodBlock = hood
-    ? `<h2>One neighborhood</h2><p class="note">${esc(hood.root)} in tenant ${hood.tenant} (a middle-sized one), and what is connected to it within ${hood.hops} steps: ${hood.nodes.length} objects, ${hood.edges.length} tuples${hood.capped ? '. Nearest first; more neighbors exist and were left out to keep this readable' : ''}. The pick is seeded, so the same config shows the same piece. Hover a dot or a line for its name.</p>${hoodGraph(hood, compiled)}`
-    : ''
+  const hoodBlock = hood ? hoodSection(hood, compiled, 'A sample:') : input.noSample ? `<h2>One neighborhood</h2><p class="note">${esc(input.noSample)}</p>` : ''
   const cards = report.edges.map((e) => {
     const def = typeOf.get(e.key)
     return edgeCard(e, def?.subjectType ?? '', def?.objectType ?? '')
+  })
+  const graphEdges = report.edges.map((e) => {
+    const def = typeOf.get(e.key)
+    return { key: e.key, tuples: e.tuples, tip: `${e.key}: ${num(e.tuples)} tuples${e.count ? `, per ${e.per === 'subject' ? def?.subjectType : def?.objectType}: p50 ${e.count.p50}, p90 ${e.count.p90}, max ${e.count.max}` : ''}` }
   })
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>${esc(id)} report</title><style>${CSS}</style></head><body>
@@ -232,8 +310,8 @@ export function renderReportHtml(input: HtmlInput): string {
 <p class="meta">${num(report.tuples)} tuples from ${num(report.tenants.generated)} of ${num(report.tenants.total)} tenant(s) in ${seconds}s, peak memory ${num(report.peakRssMb)} MB.</p>
 ${banner}${warnings}
 <h2>How the types connect</h2>
-<p class="note">Each box is a type, with how many objects it has. Each arrow is one way a tuple can be written, from the subject to the object it is written on. Line width follows the tuple count (log scale). Labels show the relation and the tuples written.</p>
-${modelGraph(input)}
+<p class="note">${GRAPH_NOTE} Labels show the relation and the tuples written.</p>
+${modelGraph(compiled, input.counts, graphEdges)}
 ${sizeBlock}
 <h2>Distribution per edge</h2>
 <p class="note">Blue: how many tuples each object (or subject) that has any got. Orange: the same count from the other side. Red dashes mark p50 and p90.</p>

@@ -54,7 +54,7 @@ To skip the questions, add `--skip`: `init <model> --skip` writes the same file 
 
 ### plan
 
-`plan` plans the tenants and projected tuples, but writes nothing.
+`plan` plans the tenants and projected tuples without building the store. It also writes `<id>.plan.html`; open it in a browser to see, before you build, how the types connect, the projected size of every tenant, what each edge was asked for (drawn from the config) and one sample neighborhood, which is a real tenant generated in memory.
 
 ```bash
 npx tsx src/cli.ts plan

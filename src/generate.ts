@@ -233,6 +233,36 @@ function ksDistance(hist: Map<number, number>, cdf: (k: number) => number): numb
 }
 
 const MAX_LISTED_VIOLATIONS = 20
+
+/** What an edge was configured to do, in words. */
+export function askedText(e: Edge, cfg: EdgeSettings): string {
+  const perSubject = cfg.per === 'subject' && (e.kind === 'assignment' || e.kind === 'block')
+  return e.kind === 'nesting' ? `depth ${cfg.depth}${cfg.branching ? `, branching ${cfg.branching}` : ''}, ${Math.round(cfg.coverage * 100)}% nested`
+    : e.kind === 'wildcard' ? `${(cfg.coverage * 100).toFixed(1)}% public`
+    : cfg.perLevel ? `per level ${cfg.perLevel.join(' / ')}`
+    : `${describeDist(cfg.dist)} per ${perSubject ? e.subjectType : e.objectType}, ${Math.round(cfg.coverage * 100)}% covered`
+}
+
+/**
+ * The count per object an edge was asked for, as bins, drawn from the config alone. Undefined when the count
+ * depends on the pool, on levels or on a gate, which cannot be shown without building.
+ */
+export function askedBins(e: Edge, cfg: EdgeSettings): { bins: Bin[]; p50: number; p90: number } | undefined {
+  if (e.kind === 'nesting' || e.kind === 'wildcard' || cfg.perLevel || isGated(e)) return undefined
+  const cdf = countCdf(cfg.dist)
+  if (!cdf) return undefined
+  const hist = new Map<number, number>()
+  let p50: number | undefined
+  let p90: number | undefined
+  for (let k = 0; k <= 5000; k++) {
+    const p = cdf(k) - (k ? cdf(k - 1) : 0)
+    if (p > 0) hist.set(k, Math.round(p * 1e6))
+    if (p50 === undefined && cdf(k) >= 0.5) p50 = k
+    if (p90 === undefined && cdf(k) >= 0.9) p90 = k
+    if (cdf(k) >= 1) break
+  }
+  return hist.size ? { bins: binned(hist), p50: p50 ?? 0, p90: p90 ?? 0 } : undefined
+}
 /** A subject can be at most this many times as popular as the median one. */
 const MAX_POPULARITY_RATIO = 50
 
@@ -646,10 +676,7 @@ export function generate(c: Compiled, r: Resolved, opts: GenerateOptions): Repor
     const cfg = r.edges.get(e.key)!
     const st = stats.get(e.key)!
     const perSubject = cfg.per === 'subject' && (e.kind === 'assignment' || e.kind === 'block')
-    const asked = e.kind === 'nesting' ? `depth ${cfg.depth}${cfg.branching ? `, branching ${cfg.branching}` : ''}, ${Math.round(cfg.coverage * 100)}% nested`
-      : e.kind === 'wildcard' ? `${(cfg.coverage * 100).toFixed(1)}% public`
-      : cfg.perLevel ? `per level ${cfg.perLevel.join(' / ')}`
-      : `${describeDist(cfg.dist)} per ${perSubject ? e.subjectType : e.objectType}, ${Math.round(cfg.coverage * 100)}% covered`
+    const asked = askedText(e, cfg)
     const cdf = e.kind !== 'nesting' && e.kind !== 'wildcard' && !cfg.perLevel && !isGated(e) ? countCdf(cfg.dist) : undefined
     const ks = cdf && st.covered ? ksDistance(st.counts, cdf) : undefined
     // Off target beyond what the number of objects explains (99% Kolmogorov-Smirnov bound).

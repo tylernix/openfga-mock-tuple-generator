@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { resolve } from '../src/config.js'
-import { binned, generate } from '../src/generate.js'
-import { renderReportHtml } from '../src/html.js'
-import { neighborhood } from '../src/neighborhood.js'
+import { askedBins, binned, generate, layout, project } from '../src/generate.js'
+import { renderPlanHtml, renderReportHtml } from '../src/html.js'
+import { medianTenant, neighborhood, sampleSkipReason } from '../src/neighborhood.js'
 import { memorySink } from '../src/output.js'
 import { config, model } from './helpers.js'
 
@@ -13,6 +13,55 @@ const setup = (name: string) => {
   const report = generate(c, r, { sink: memorySink() })
   return { c, r, report }
 }
+
+describe('the plan page', () => {
+  const planOf = (name: string) => {
+    const c = model(name)
+    const r = resolve(c, config(name, { counts: small(name) }))
+    const lay = layout(c, r)
+    const projection = project(c, r, lay)
+    return { c, r, lay, projection }
+  }
+
+  it('says nothing was built, lists every edge, and carries no script', () => {
+    const { c, r, lay, projection } = planOf('drive')
+    const html = renderPlanHtml({ id: 'x', compiled: c, resolved: r, layout: lay, projection })
+    expect(html).toContain('Nothing has been built')
+    for (const e of c.edges) expect(html).toContain(e.key)
+    expect(html).not.toContain('<script')
+    expect(html).not.toContain('One neighborhood')
+  })
+
+  it('explains why there is no sample instead of building a huge one', () => {
+    const { c, r, lay, projection } = planOf('drive')
+    const html = renderPlanHtml({ id: 'x', compiled: c, resolved: r, layout: lay, projection, noSample: 'No sample drawn: too big' })
+    expect(html).toContain('No sample drawn: too big')
+    expect(sampleSkipReason(1_000_000, 0)).toMatch(/No sample drawn/)
+    expect(sampleSkipReason(1_000, 500)).toBeUndefined()
+  })
+
+  it('picks a middle-sized tenant', () => {
+    expect(medianTenant([5, 1, 9, 3, 7])).toBe(0)
+    expect(medianTenant([])).toBe(0)
+  })
+})
+
+describe('asked distributions', () => {
+  it('are drawn from the config for a spread, and sum to one', () => {
+    const { c, r } = setup('drive')
+    const shown = c.edges.map((e) => ({ e, a: askedBins(e, r.edges.get(e.key)!) })).filter((x) => x.a)
+    expect(shown.length).toBeGreaterThan(0)
+    for (const { a } of shown) {
+      expect(a!.p50).toBeLessThanOrEqual(a!.p90)
+      expect(a!.bins.reduce((s, b) => s + b.n, 0)).toBeGreaterThan(900_000)
+    }
+  })
+
+  it('are not drawn for nesting, wildcard or pool-dependent edges', () => {
+    const { c, r } = setup('drive')
+    for (const e of c.edges.filter((x) => x.kind === 'nesting' || x.kind === 'wildcard')) expect(askedBins(e, r.edges.get(e.key)!)).toBeUndefined()
+  })
+})
 
 describe('binned', () => {
   it('keeps exact values when there are few', () => {

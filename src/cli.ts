@@ -9,8 +9,8 @@ import { inDir, latestConfig, newPlanId, OUTPUT_DIR, planId, runDir } from './na
 import { fileSink, type Format } from './output.js'
 import { parseCount, select } from './prompt.js'
 import { formatPlan, formatReport, formatVerdict } from './report.js'
-import { renderReportHtml } from './html.js'
-import { neighborhood } from './neighborhood.js'
+import { renderPlanHtml, renderReportHtml } from './html.js'
+import { medianTenant, neighborhood, sampleSkipReason } from './neighborhood.js'
 import { suggestTenant } from './tenants.js'
 import { verify } from './verify.js'
 
@@ -22,7 +22,8 @@ const USAGE = `fga-tuple-gen: mock tuple stores for any OpenFGA model
       The config goes in its own folder, output/<date>-<time>/<date>-<time>.gen.json, like output/20261113-0936/20261113-0936.gen.json,
       unless you pass --out.
   plan [config.gen.json] [--scale 0.01]
-      Tenants, projected tuples per edge and warnings. Writes nothing.
+      Tenants, projected tuples per edge and warnings, plus <config id>.plan.html in the config's folder: the same
+      as charts, with what each edge was asked for and one generated sample. Builds nothing else.
   build [config.gen.json] [--out <file>] [--format csv|jsonl|yaml] [--tenants 0,3,9] [--scale 0.01] [--report <file>]
       Streams the store to <config id>.tuples.csv in the config's folder and prints what was realized per edge.
       The full report (what was asked, the other side, clipped counts) is written beside it as <config id>.report.json,
@@ -30,7 +31,7 @@ const USAGE = `fga-tuple-gen: mock tuple stores for any OpenFGA model
       Exits 1 if a rule is broken.
   verify [config.gen.json] [--max-tuples 20000] [--scale 0.01] [--out <file>]
       Loads a pilot (whole tenants of the full store) into OpenFGA's in-memory server and compares answers.
-      The test file it loads is kept as <config id>.pilot.yaml in the config's folder.
+      The test file it loads is kept as <config id>.pilot.fga.yaml in the config's folder.
 
   Everything built from a config goes in output/<config id>/. A bare name after --out or --report lands there;
   a path with a folder is used as given.
@@ -161,9 +162,17 @@ async function main() {
   }
 
   if (command === 'plan') {
-    const { compiled, resolved } = load(configArg(positional), flags)
+    const configPath = configArg(positional)
+    const { compiled, resolved } = load(configPath, flags)
     const lay = layout(compiled, resolved)
-    console.log(formatPlan(compiled, resolved, lay, project(compiled, resolved, lay)))
+    const projection = project(compiled, resolved, lay)
+    console.log(formatPlan(compiled, resolved, lay, projection))
+    const tenant = medianTenant(projection.perTenant)
+    const noSample = sampleSkipReason(projection.perTenant[tenant] ?? 0, projection.shared)
+    const planPath = join(runDir(configPath), `${planId(configPath)}${flags.has('scale') ? `.scale-${flags.get('scale')}` : ''}.plan.html`)
+    mkdirSync(dirname(planPath), { recursive: true })
+    writeFileSync(planPath, renderPlanHtml({ id: planId(configPath), compiled, resolved, layout: lay, projection, ...(noSample ? { noSample } : { neighborhood: neighborhood(compiled, resolved, tenant) }) }))
+    console.log(`\nCharts of this plan, open in a browser: ${planPath}`)
     return
   }
 
@@ -185,8 +194,10 @@ async function main() {
     mkdirSync(dirname(reportPath), { recursive: true })
     writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n')
     const htmlPath = `${reportPath.replace(/\.json$/, '')}.html`
-    const hood = report.tenantSizes ? neighborhood(compiled, resolved, report.tenantSizes.medianTenant) : undefined
-    writeFileSync(htmlPath, renderReportHtml({ id: planId(configPath), report, compiled, counts: resolved.counts, neighborhood: hood }))
+    const hoodTuples = report.tenantSizes?.median ?? 0
+    const noSample = sampleSkipReason(hoodTuples, project(compiled, resolved).shared)
+    const hood = report.tenantSizes && !noSample ? neighborhood(compiled, resolved, report.tenantSizes.medianTenant) : undefined
+    writeFileSync(htmlPath, renderReportHtml({ id: planId(configPath), report, compiled, counts: resolved.counts, ...(hood ? { neighborhood: hood } : {}), ...(noSample ? { noSample } : {}) }))
     console.log(formatReport(report, { json: reportPath, html: htmlPath }))
     console.log(`\nWrote ${out}`)
     console.log('Next: verify has OpenFGA check a pilot of this store.')
@@ -197,7 +208,7 @@ async function main() {
   if (command === 'verify') {
     const configPath = configArg(positional)
     const { compiled, resolved } = load(configPath, flags)
-    const file = flags.has('out') ? inDir(flags.get('out')!, runDir(configPath)) : join(runDir(configPath), `${planId(configPath)}.pilot.yaml`)
+    const file = flags.has('out') ? inDir(flags.get('out')!, runDir(configPath)) : join(runDir(configPath), `${planId(configPath)}.pilot.fga.yaml`)
     const verdict = verify(compiled, resolved, { file, ...(flags.has('max-tuples') ? { maxTuples: Number(flags.get('max-tuples')) } : {}) })
     console.log(formatVerdict(verdict))
     if (!verdict.ok) process.exitCode = 1

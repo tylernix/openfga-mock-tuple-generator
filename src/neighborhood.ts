@@ -27,6 +27,21 @@ export interface Neighborhood {
 }
 
 const HOPS = 2
+/** The sample builds one tenant and the shared block in memory, so a huge one is skipped. */
+const MAX_SAMPLE_TUPLES = 300_000
+
+/** The index of a middle-sized tenant, by tuples. */
+export function medianTenant(sizes: ArrayLike<number>): number {
+  return Array.from({ length: sizes.length }, (_, t) => t).sort((a, b) => sizes[a] - sizes[b] || a - b)[Math.floor(sizes.length / 2)] ?? 0
+}
+
+/** Why a sample is not drawn, or undefined when it is cheap enough. */
+export function sampleSkipReason(tenantTuples: number, sharedTuples: number): string | undefined {
+  const total = Math.round(tenantTuples + sharedTuples)
+  return total > MAX_SAMPLE_TUPLES
+    ? `No sample drawn: a middle-sized tenant plus the shared block is about ${total.toLocaleString('en-US')} tuples, more than the ${MAX_SAMPLE_TUPLES.toLocaleString('en-US')} this page builds in memory for a picture.`
+    : undefined
+}
 const MAX_NODES = 120
 /** Neighbors taken per node: the root shows more than the nodes around it, which would otherwise crowd it out. */
 const PER_NODE = [40, 8]

@@ -138,7 +138,7 @@ describe('the README steps, with no config file named', () => {
 
     const build = run(dir, ['build'])
     expect(build.status, build.stderr).toBe(0)
-    expect(readdirSync(join(dir, 'output', id)).sort()).toEqual([`${id}.gen.json`, `${id}.report.html`, `${id}.report.json`, `${id}.tuples.csv`])
+    expect(readdirSync(join(dir, 'output', id)).sort()).toEqual([`${id}.gen.json`, `${id}.plan.html`, `${id}.report.html`, `${id}.report.json`, `${id}.tuples.csv`])
     expect(readdirSync(dir)).toEqual(['output'])
   })
 
@@ -181,10 +181,7 @@ describe('the README steps, with no config file named', () => {
     run(dir, ['init', simple, '--skip', '--out', '20200101-0000.gen.json'])
     const verify = run(dir, ['verify', '--max-tuples', '3000'])
     expect(verify.status, verify.stdout + verify.stderr).toBe(0)
-    const files = readdirSync(join(dir, 'output', '20200101-0000'))
-    expect(files).toContain('20200101-0000.pilot.yaml')
-    // The OpenFGA editor extension takes over .fga.yaml and stops validating past 1,000 tuples.
-    expect(files.filter((f) => f.endsWith('.fga.yaml'))).toEqual([])
+    expect(readdirSync(join(dir, 'output', '20200101-0000'))).toContain('20200101-0000.pilot.fga.yaml')
   })
 
   it('--skip asks nothing, even when it comes before the model', () => {
@@ -272,6 +269,29 @@ describe('the README steps, with no config file named', () => {
     const plan = run(dir, ['plan'])
     expect(plan.status).not.toBe(0)
     expect(plan.stderr).toContain('no config file')
+  })
+
+  it('plan writes a page from the config alone, before anything is built', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tuplegen-'))
+    dirs.push(dir)
+    run(dir, ['init', simple, '--skip', '--out', '20200101-0000.gen.json'])
+    const plan = run(dir, ['plan'])
+    expect(plan.status, plan.stderr).toBe(0)
+    expect(plan.stdout).toContain('20200101-0000.plan.html')
+    expect(readdirSync(join(dir, 'output', '20200101-0000')).sort()).toEqual(['20200101-0000.gen.json', '20200101-0000.plan.html'])
+    const html = readFileSync(join(dir, 'output', '20200101-0000', '20200101-0000.plan.html'), 'utf8')
+    expect(html).toContain('Nothing has been built')
+    expect(html).toContain('document#viewer:user')
+    expect(html).toContain('<svg')
+    expect(html).not.toContain('<script')
+  })
+
+  it('a scaled plan gets its own page name', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tuplegen-'))
+    dirs.push(dir)
+    run(dir, ['init', simple, '--skip', '--out', '20200101-0000.gen.json'])
+    expect(run(dir, ['plan', '--scale', '0.01']).status).toBe(0)
+    expect(readdirSync(join(dir, 'output', '20200101-0000'))).toContain('20200101-0000.scale-0.01.plan.html')
   })
 
   it('a count that is not a number is an error when answers are piped', () => {

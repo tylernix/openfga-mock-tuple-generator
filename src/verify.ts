@@ -156,7 +156,7 @@ export function buildAssertions(c: Compiled, r: Resolved, dsl: string, tuples: O
 }
 
 export interface VerifyOptions {
-  /** The store test file to write. A second file, `.recheck.yaml`, is written beside it only when OpenFGA lists part of an answer. */
+  /** The store test file to write. A second file, `.recheck.fga.yaml`, is written beside it only when OpenFGA lists part of an answer. */
   file: string
   /** Tuple budget for the pilot (default 20,000). */
   maxTuples?: number
@@ -218,7 +218,7 @@ export function referee(c: Compiled, r: Resolved, dsl: string, tuples: OutTuple[
       const step = Math.max(1, Math.floor(p.missing.length / RECHECK_USERS))
       return p.missing.filter((_, i) => i % step === 0).slice(0, RECHECK_USERS).flatMap((user) => [`      - user: ${user}`, `        object: ${p.object}`, '        assertions:', `          ${p.relation}: true`])
     })
-    const recheckFile = file.replace(/\.yaml$/, '.recheck.yaml')
+    const recheckFile = file.replace(/(\.fga)?\.yaml$/, '.recheck.fga.yaml')
     writeFileSync(recheckFile, [built.yaml.slice(0, built.yaml.indexOf('\ntests:\n')), 'tests:', '  - name: users a partial ListUsers left out', '    check:', ...recheck].join('\n') + '\n')
     const again = summary(fgaRun(['model', 'test', '--tests', recheckFile]).out, 'Checks')
     if (again && again.passing === again.total) incomplete = partial.length
